@@ -72,6 +72,7 @@ class MainWindow(Toplevel):
             "anchor_wmm": 30.0,
             "anchor_hmm": 30.0,
             "fabric_type": "矩形布料",
+            "offset_estimation_mode": "中心点偏差估计",
             "fabric_color_mode": "黑白布料",
             "hsv_lower": [0, 0, 0],
             "hsv_upper": [360, 100, 100],
@@ -407,6 +408,7 @@ class MainWindow(Toplevel):
         for k in ["exposure_us", "bin_thresh", "ppm", "anchor_xmm", "anchor_ymm", "anchor_wmm", "anchor_hmm"]:
             merged[k] = float(merged[k])
         merged["fabric_type"] = str(merged.get("fabric_type", "矩形布料"))
+        merged["offset_estimation_mode"] = str(merged.get("offset_estimation_mode", "中心点偏差估计"))
         merged["fabric_color_mode"] = str(merged.get("fabric_color_mode", "黑白布料"))
 
         hsv_lower = merged.get("hsv_lower", [0, 0, 0])

@@ -64,6 +64,7 @@ class Setting(Frame):
             "定位W(mm)": StringVar(value="30"),
             "定位H(mm)": StringVar(value="30"),
             "布料类型": StringVar(value="矩形布料"),
+            "偏移估计模式": StringVar(value="中心点偏差估计"),
             "识别模式": StringVar(value="黑白布料"),
             "HSV下界H": StringVar(value="0"),
             "HSV下界S": StringVar(value="0"),
@@ -94,6 +95,16 @@ class Setting(Frame):
             state="readonly",
         )
         fabric_combo.grid(row=row_idx, column=1, sticky="ew", pady=5)
+
+        row_idx += 1
+        ttk.Label(alg_card, text="偏移估计:", style="Key.TLabel").grid(row=row_idx, column=0, sticky="w", pady=5, padx=(0, 8))
+        offset_mode_combo = ttk.Combobox(
+            alg_card,
+            textvariable=self.setting_vars["偏移估计模式"],
+            values=["左上端点偏差估计", "中心点偏差估计", "右下端点偏差估计"],
+            state="readonly",
+        )
+        offset_mode_combo.grid(row=row_idx, column=1, sticky="ew", pady=5)
 
         row_idx += 1
         ttk.Label(alg_card, text="识别模式:", style="Key.TLabel").grid(row=row_idx, column=0, sticky="w", pady=5, padx=(0, 8))
@@ -167,6 +178,7 @@ class Setting(Frame):
             "anchor_wmm": float(self.setting_vars["定位W(mm)"].get()),
             "anchor_hmm": float(self.setting_vars["定位H(mm)"].get()),
             "fabric_type": self.setting_vars["布料类型"].get(),
+            "offset_estimation_mode": self.setting_vars["偏移估计模式"].get(),
             "fabric_color_mode": self.setting_vars["识别模式"].get(),
             "hsv_lower": hsv_lower,
             "hsv_upper": hsv_upper,
@@ -181,6 +193,7 @@ class Setting(Frame):
         self.setting_vars["定位W(mm)"].set(str(settings.get("anchor_wmm", 30)))
         self.setting_vars["定位H(mm)"].set(str(settings.get("anchor_hmm", 30)))
         self.setting_vars["布料类型"].set(str(settings.get("fabric_type", "矩形布料")))
+        self.setting_vars["偏移估计模式"].set(str(settings.get("offset_estimation_mode", "中心点偏差估计")))
         self.setting_vars["识别模式"].set(str(settings.get("fabric_color_mode", "黑白布料")))
 
         hsv_lower = settings.get("hsv_lower", [0, 0, 0])
@@ -246,6 +259,7 @@ class Setting(Frame):
             "anchor_wmm": 30,
             "anchor_hmm": 30,
             "fabric_type": "矩形布料",
+            "offset_estimation_mode": "中心点偏差估计",
             "fabric_color_mode": "黑白布料",
             "hsv_lower": [0, 0, 0],
             "hsv_upper": [360, 100, 100],

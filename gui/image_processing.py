@@ -28,6 +28,7 @@ class ProcessingEngine:
         self.anchor_wmm = 30.0
         self.anchor_hmm = 30.0
         self.fabric_type = "矩形布料"
+        self.offset_estimation_mode = "中心点偏差估计"
         self.fabric_color_mode = "黑白布料"
         self.hsv_lower = np.array([0, 0, 0], dtype=np.float32)
         self.hsv_upper = np.array([360, 100, 100], dtype=np.float32)
@@ -86,6 +87,7 @@ class ProcessingEngine:
         self.anchor_wmm = float(settings.get("anchor_wmm", self.anchor_wmm))
         self.anchor_hmm = float(settings.get("anchor_hmm", self.anchor_hmm))
         self.fabric_type = str(settings.get("fabric_type", self.fabric_type))
+        self.offset_estimation_mode = str(settings.get("offset_estimation_mode", self.offset_estimation_mode))
 
         self.fabric_color_mode = str(settings.get("fabric_color_mode", self.fabric_color_mode))
         hsv_lower = settings.get("hsv_lower", self.hsv_lower.tolist())
@@ -168,7 +170,7 @@ class ProcessingEngine:
         img_ = img.copy()
         box_px_i = np.round(np.asarray(box_px, dtype=np.float32).reshape(-1, 2)).astype(np.int32)
         cv2.fillPoly(img_, [box_px_i], (0, 255, 0))
-        return cv2.addWeighted(img_, 0.3, img, 0.7, 0)
+        return cv2.addWeighted(img_, 0.4, img, 0.6, 0)
     
     def draw_detected_object(self, img, points, color=(0, 0, 255), thickness=4):
         img_ = img.copy()
@@ -262,7 +264,7 @@ class ProcessingEngine:
         bl = pts[np.argmax(d)]
         return np.array([tl, tr, br, bl], dtype=np.float32)
 
-    def _estimate_transfer(self, ref_pts, det_pts):
+    def _estimate_transfer(self, ref_pts, det_pts, offset_mode="中心点偏差估计"):
         ref = self._order_box_points(ref_pts).astype(np.float64)
         det = self._order_box_points(det_pts).astype(np.float64)
 
@@ -278,7 +280,17 @@ class ProcessingEngine:
             Vt[-1, :] *= -1
             R = Vt.T @ U.T
 
-        t = c_det - (R @ c_ref)
+        if offset_mode == "左上端点偏差估计":
+            ref_anchor = ref[0]
+            det_anchor = det[0]
+        elif offset_mode == "右下端点偏差估计":
+            ref_anchor = ref[2]
+            det_anchor = det[2]
+        else:
+            ref_anchor = c_ref
+            det_anchor = c_det
+
+        t = det_anchor - (R @ ref_anchor)
         pred = (R @ ref.T).T + t
         err = pred - det
         rmse = float(np.sqrt(np.mean(np.sum(err * err, axis=1))))
@@ -286,6 +298,14 @@ class ProcessingEngine:
         theta_deg = float(np.degrees(np.arctan2(R[1, 0], R[0, 0])))
         theta_deg = ((theta_deg + 90.0) % 180.0) - 90.0
         return float(t[0]), float(t[1]), theta_deg, rmse
+
+    def _to_local_coord_offset_mm(self, dx_mm: float, dy_mm: float):
+        theta = np.deg2rad(float(self.ori[2]) if len(self.ori) >= 3 else 0.0)
+        ux = np.array([np.cos(theta), np.sin(theta)], dtype=np.float64)
+        uy = np.array([-np.sin(theta), np.cos(theta)], dtype=np.float64)
+        v = np.array([dx_mm, dy_mm], dtype=np.float64)
+        # Project image-axis offset to the detected local coordinate basis.
+        return float(np.dot(v, ux)), float(np.dot(v, uy))
 
     def process(self, frame: np.ndarray) -> dict:
         # 1. 图像变换（去畸变+透视变换）
@@ -315,17 +335,20 @@ class ProcessingEngine:
         }
 
         if found:
-            dx, dy, theta, rmse = self._estimate_transfer(box_ref_px, box_detected)
+            dx, dy, theta, rmse = self._estimate_transfer(box_ref_px, box_detected, self.offset_estimation_mode)
             rect = cv2.minAreaRect(box_detected.astype(np.float32))
             w_px, h_px = rect[1]
             width_mm = float(min(w_px, h_px) / max(self.ppm, 1e-6))
             length_mm = float(max(w_px, h_px) / max(self.ppm, 1e-6))
             area_mm2 = float(cv2.contourArea(box_detected.astype(np.float32)) / max(self.ppm * self.ppm, 1e-6))
+            dx_mm_img = float(dx / max(self.ppm, 1e-6))
+            dy_mm_img = float(dy / max(self.ppm, 1e-6))
+            dx_mm_local, dy_mm_local = self._to_local_coord_offset_mm(dx_mm_img, dy_mm_img)
 
             result.update(
                 {
-                    "offset_x_mm": float(dx / max(self.ppm, 1e-6)),
-                    "offset_y_mm": float(dy / max(self.ppm, 1e-6)),
+                    "offset_x_mm": dx_mm_local,
+                    "offset_y_mm": dy_mm_local,
                     "theta_deg": float(theta),
                     "rmse": float(rmse / max(self.ppm, 1e-6)),
                     "width_mm": width_mm,
@@ -344,7 +367,7 @@ class ProcessingEngine:
             "ori": im_ori_crop,
             "ref": im_ref,
             "preprocess": im_pre,
-            "final": im_final,
+            "final": im_final[0:800,:],
             "found": found,
             "result": result,
             "origin": self.ori,
