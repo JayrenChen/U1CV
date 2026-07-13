@@ -28,6 +28,9 @@ class ProcessingEngine:
         self.anchor_wmm = 30.0
         self.anchor_hmm = 30.0
         self.fabric_type = "矩形布料"
+        self.fabric_color_mode = "黑白布料"
+        self.hsv_lower = np.array([0, 0, 0], dtype=np.float32)
+        self.hsv_upper = np.array([360, 100, 100], dtype=np.float32)
 
         self.x_min_mm = -30.0
         self.x_max_mm = 200.0
@@ -73,6 +76,9 @@ class ProcessingEngine:
         return np.array([[0, 0], [40, 0], [40, 40], [0, 40]], dtype=np.float32)
 
     def apply_settings(self, settings: dict):
+        def _clamp_int(value, low, high):
+            return max(low, min(high, int(value)))
+
         self.bin_thresh = float(settings.get("bin_thresh", self.bin_thresh))
         self.ppm = float(settings.get("ppm", self.ppm))
         self.anchor_xmm = float(settings.get("anchor_xmm", self.anchor_xmm))
@@ -80,6 +86,38 @@ class ProcessingEngine:
         self.anchor_wmm = float(settings.get("anchor_wmm", self.anchor_wmm))
         self.anchor_hmm = float(settings.get("anchor_hmm", self.anchor_hmm))
         self.fabric_type = str(settings.get("fabric_type", self.fabric_type))
+
+        self.fabric_color_mode = str(settings.get("fabric_color_mode", self.fabric_color_mode))
+        hsv_lower = settings.get("hsv_lower", self.hsv_lower.tolist())
+        hsv_upper = settings.get("hsv_upper", self.hsv_upper.tolist())
+        try:
+            hsv_lower = list(hsv_lower)
+            hsv_upper = list(hsv_upper)
+        except Exception:
+            hsv_lower = [0, 0, 0]
+            hsv_upper = [360, 100, 100]
+
+        if len(hsv_lower) != 3:
+            hsv_lower = [0, 0, 0]
+        if len(hsv_upper) != 3:
+            hsv_upper = [360, 100, 100]
+
+        self.hsv_lower = np.array(
+            [
+                _clamp_int(hsv_lower[0], 0, 360),
+                _clamp_int(hsv_lower[1], 0, 100),
+                _clamp_int(hsv_lower[2], 0, 100),
+            ],
+            dtype=np.float32,
+        )
+        self.hsv_upper = np.array(
+            [
+                _clamp_int(hsv_upper[0], 0, 360),
+                _clamp_int(hsv_upper[1], 0, 100),
+                _clamp_int(hsv_upper[2], 0, 100),
+            ],
+            dtype=np.float32,
+        )
         self._recompute_projection()
 
     def _recompute_projection(self):
@@ -171,9 +209,22 @@ class ProcessingEngine:
         return [float(tl[0] + x), float(tl[1] + y), angle_deg], crop
 
     def _preprocess(self, img):
-        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        img_blur = cv2.GaussianBlur(img_gray, (5, 5), 0)
-        _, img_bin = cv2.threshold(img_blur, self.bin_thresh, 255, cv2.THRESH_BINARY_INV)
+        if self.fabric_color_mode == "彩色布料":
+            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            _hsv_lower = self.hsv_lower.copy()
+            _hsv_upper = self.hsv_upper.copy()
+            _hsv_lower[0] = int(_hsv_lower[0] / 2.0)
+            _hsv_lower[1] = int(_hsv_lower[1] / 100.0 * 255.0)
+            _hsv_lower[2] = int(_hsv_lower[2] / 100.0 * 255.0)
+            _hsv_upper[0] = int(_hsv_upper[0] / 2.0)
+            _hsv_upper[1] = int(_hsv_upper[1] / 100.0 * 255.0)
+            _hsv_upper[2] = int(_hsv_upper[2] / 100.0 * 255.0)
+            print(f"HSV Lower: {_hsv_lower}, HSV Upper: {_hsv_upper}")
+            img_bin = cv2.inRange(hsv, _hsv_lower, _hsv_upper)
+        else:
+            img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img_blur = cv2.GaussianBlur(img_gray, (5, 5), 0)
+            _, img_bin = cv2.threshold(img_blur, self.bin_thresh, 255, cv2.THRESH_BINARY_INV)
 
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(img_bin, connectivity=8)
         if num_labels <= 1:

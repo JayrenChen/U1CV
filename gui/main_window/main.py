@@ -40,7 +40,6 @@ LOCAL_FONT_CANDIDATES = {
 def relative_to_assets(path: str) -> Path:
     return ASSETS_PATH / Path(path)
 
-
 def mainWindow(root=None):
     return MainWindow(root)
 
@@ -73,6 +72,9 @@ class MainWindow(Toplevel):
             "anchor_wmm": 30.0,
             "anchor_hmm": 30.0,
             "fabric_type": "矩形布料",
+            "fabric_color_mode": "黑白布料",
+            "hsv_lower": [0, 0, 0],
+            "hsv_upper": [360, 100, 100],
         }
         self.runtime_settings = self._load_runtime_settings()
         self.logo_full = None
@@ -397,11 +399,40 @@ class MainWindow(Toplevel):
         return dict(self.runtime_settings)
 
     def apply_runtime_settings(self, new_settings):
+        def _clamp_int(value, low, high):
+            return max(low, min(high, int(value)))
+
         merged = dict(self.runtime_settings)
         merged.update(new_settings)
         for k in ["exposure_us", "bin_thresh", "ppm", "anchor_xmm", "anchor_ymm", "anchor_wmm", "anchor_hmm"]:
             merged[k] = float(merged[k])
         merged["fabric_type"] = str(merged.get("fabric_type", "矩形布料"))
+        merged["fabric_color_mode"] = str(merged.get("fabric_color_mode", "黑白布料"))
+
+        hsv_lower = merged.get("hsv_lower", [0, 0, 0])
+        hsv_upper = merged.get("hsv_upper", [360, 100, 100])
+        try:
+            hsv_lower = list(hsv_lower)
+            hsv_upper = list(hsv_upper)
+        except Exception:
+            hsv_lower = [0, 0, 0]
+            hsv_upper = [360, 100, 100]
+
+        if len(hsv_lower) != 3:
+            hsv_lower = [0, 0, 0]
+        if len(hsv_upper) != 3:
+            hsv_upper = [360, 100, 100]
+
+        merged["hsv_lower"] = [
+            _clamp_int(hsv_lower[0], 0, 360),
+            _clamp_int(hsv_lower[1], 0, 100),
+            _clamp_int(hsv_lower[2], 0, 100),
+        ]
+        merged["hsv_upper"] = [
+            _clamp_int(hsv_upper[0], 0, 360),
+            _clamp_int(hsv_upper[1], 0, 100),
+            _clamp_int(hsv_upper[2], 0, 100),
+        ]
         self.runtime_settings = merged
         if self.camera is not None:
             self.camera.update_exposure(self.runtime_settings["exposure_us"])

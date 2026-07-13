@@ -1,0 +1,21 @@
+{
+  "exposure_us": 50000.0,
+  "bin_thresh": 60.0,
+  "ppm": 5.0,
+  "anchor_xmm": 10.0,
+  "anchor_ymm": 10.0,
+  "anchor_wmm": 30.0,
+  "anchor_hmm": 30.0,
+  "fabric_type": "矩形布料",
+  "fabric_color_mode": "彩色布料",
+  "hsv_lower": [
+    240,
+    10,
+    20
+  ],
+  "hsv_upper": [
+    280,
+    80,
+    80
+  ]
+}

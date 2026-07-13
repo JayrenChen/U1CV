@@ -64,6 +64,13 @@ class Setting(Frame):
             "定位W(mm)": StringVar(value="30"),
             "定位H(mm)": StringVar(value="30"),
             "布料类型": StringVar(value="矩形布料"),
+            "识别模式": StringVar(value="黑白布料"),
+            "HSV下界H": StringVar(value="0"),
+            "HSV下界S": StringVar(value="0"),
+            "HSV下界V": StringVar(value="0"),
+            "HSV上界H": StringVar(value="360"),
+            "HSV上界S": StringVar(value="100"),
+            "HSV上界V": StringVar(value="100"),
         }
 
         cam_fields = ["曝光时间(us)"]
@@ -87,6 +94,39 @@ class Setting(Frame):
             state="readonly",
         )
         fabric_combo.grid(row=row_idx, column=1, sticky="ew", pady=5)
+
+        row_idx += 1
+        ttk.Label(alg_card, text="识别模式:", style="Key.TLabel").grid(row=row_idx, column=0, sticky="w", pady=5, padx=(0, 8))
+        mode_combo = ttk.Combobox(
+            alg_card,
+            textvariable=self.setting_vars["识别模式"],
+            values=["黑白布料", "彩色布料"],
+            state="readonly",
+        )
+        mode_combo.grid(row=row_idx, column=1, sticky="ew", pady=5)
+        mode_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_color_inputs_state())
+
+        row_idx += 1
+        ttk.Label(alg_card, text="HSV下界(H,S,V):", style="Key.TLabel").grid(row=row_idx, column=0, sticky="w", pady=5, padx=(0, 8))
+        hsv_lower_frame = ttk.Frame(alg_card, style="Main.TFrame")
+        hsv_lower_frame.grid(row=row_idx, column=1, sticky="ew", pady=5)
+        self.hsv_entries = []
+        for i, key in enumerate(["HSV下界H", "HSV下界S", "HSV下界V"]):
+            entry = ttk.Entry(hsv_lower_frame, textvariable=self.setting_vars[key], width=6)
+            entry.grid(row=0, column=i, sticky="ew", padx=(0, 4) if i < 2 else (0, 0))
+            hsv_lower_frame.columnconfigure(i, weight=1)
+            self.hsv_entries.append(entry)
+
+        row_idx += 1
+        ttk.Label(alg_card, text="HSV上界(H,S,V):", style="Key.TLabel").grid(row=row_idx, column=0, sticky="w", pady=5, padx=(0, 8))
+        hsv_upper_frame = ttk.Frame(alg_card, style="Main.TFrame")
+        hsv_upper_frame.grid(row=row_idx, column=1, sticky="ew", pady=5)
+        for i, key in enumerate(["HSV上界H", "HSV上界S", "HSV上界V"]):
+            entry = ttk.Entry(hsv_upper_frame, textvariable=self.setting_vars[key], width=6)
+            entry.grid(row=0, column=i, sticky="ew", padx=(0, 4) if i < 2 else (0, 0))
+            hsv_upper_frame.columnconfigure(i, weight=1)
+            self.hsv_entries.append(entry)
+
         alg_card.columnconfigure(1, weight=1)
 
         ttk.Button(save_card, text="应用参数", command=self._on_apply).pack(side="left", padx=(0, 8))
@@ -95,8 +135,29 @@ class Setting(Frame):
         ttk.Button(save_card, text="恢复默认", command=self._on_reset).pack(side="left")
 
         self._load_from_controller()
+        self._update_color_inputs_state()
+
+    @staticmethod
+    def _clamp_int(value, low, high):
+        return max(low, min(high, int(value)))
+
+    def _update_color_inputs_state(self):
+        is_color_mode = self.setting_vars["识别模式"].get() == "彩色布料"
+        state = "normal" if is_color_mode else "disabled"
+        for entry in getattr(self, "hsv_entries", []):
+            entry.configure(state=state)
 
     def _collect_settings(self):
+        hsv_lower = [
+            self._clamp_int(self.setting_vars["HSV下界H"].get(), 0, 360),
+            self._clamp_int(self.setting_vars["HSV下界S"].get(), 0, 100),
+            self._clamp_int(self.setting_vars["HSV下界V"].get(), 0, 100),
+        ]
+        hsv_upper = [
+            self._clamp_int(self.setting_vars["HSV上界H"].get(), 0, 360),
+            self._clamp_int(self.setting_vars["HSV上界S"].get(), 0, 100),
+            self._clamp_int(self.setting_vars["HSV上界V"].get(), 0, 100),
+        ]
         return {
             "exposure_us": float(self.setting_vars["曝光时间(us)"].get()),
             "bin_thresh": float(self.setting_vars["二值阈值"].get()),
@@ -106,6 +167,9 @@ class Setting(Frame):
             "anchor_wmm": float(self.setting_vars["定位W(mm)"].get()),
             "anchor_hmm": float(self.setting_vars["定位H(mm)"].get()),
             "fabric_type": self.setting_vars["布料类型"].get(),
+            "fabric_color_mode": self.setting_vars["识别模式"].get(),
+            "hsv_lower": hsv_lower,
+            "hsv_upper": hsv_upper,
         }
 
     def _fill_vars(self, settings):
@@ -117,6 +181,29 @@ class Setting(Frame):
         self.setting_vars["定位W(mm)"].set(str(settings.get("anchor_wmm", 30)))
         self.setting_vars["定位H(mm)"].set(str(settings.get("anchor_hmm", 30)))
         self.setting_vars["布料类型"].set(str(settings.get("fabric_type", "矩形布料")))
+        self.setting_vars["识别模式"].set(str(settings.get("fabric_color_mode", "黑白布料")))
+
+        hsv_lower = settings.get("hsv_lower", [0, 0, 0])
+        hsv_upper = settings.get("hsv_upper", [360, 100, 100])
+        try:
+            hsv_lower = list(hsv_lower)
+            hsv_upper = list(hsv_upper)
+        except Exception:
+            hsv_lower = [0, 0, 0]
+            hsv_upper = [360, 100, 100]
+
+        if len(hsv_lower) != 3:
+            hsv_lower = [0, 0, 0]
+        if len(hsv_upper) != 3:
+            hsv_upper = [360, 100, 100]
+
+        self.setting_vars["HSV下界H"].set(str(self._clamp_int(hsv_lower[0], 0, 360)))
+        self.setting_vars["HSV下界S"].set(str(self._clamp_int(hsv_lower[1], 0, 100)))
+        self.setting_vars["HSV下界V"].set(str(self._clamp_int(hsv_lower[2], 0, 100)))
+        self.setting_vars["HSV上界H"].set(str(self._clamp_int(hsv_upper[0], 0, 360)))
+        self.setting_vars["HSV上界S"].set(str(self._clamp_int(hsv_upper[1], 0, 100)))
+        self.setting_vars["HSV上界V"].set(str(self._clamp_int(hsv_upper[2], 0, 100)))
+        self._update_color_inputs_state()
 
     def _load_from_controller(self):
         if self.controller is None:
@@ -159,6 +246,9 @@ class Setting(Frame):
             "anchor_wmm": 30,
             "anchor_hmm": 30,
             "fabric_type": "矩形布料",
+            "fabric_color_mode": "黑白布料",
+            "hsv_lower": [0, 0, 0],
+            "hsv_upper": [360, 100, 100],
         }
         self._fill_vars(defaults)
         if self.controller is not None:
