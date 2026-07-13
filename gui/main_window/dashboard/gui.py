@@ -33,6 +33,7 @@ class Dashboard(Frame):
         self.processor = ProcessingEngine(settings=init_settings)
         self.last_frame = None
         self.last_result = None
+        self.last_output = None
         self._panel_tk_images = {}
         self.ui_font_family = getattr(self.controller, "ui_font_family", "TkDefaultFont")
 
@@ -211,6 +212,7 @@ class Dashboard(Frame):
         self.length_var.set("--")
         self.area_var.set("--")
         self.last_result = None
+        self.last_output = None
 
     def _clear_panels(self):
         for canvas, footer in self.image_panel_map.values():
@@ -268,6 +270,7 @@ class Dashboard(Frame):
                 self.processor.apply_settings(self.controller.get_runtime_settings())
 
             output = self.processor.process(self.last_frame)
+            self.last_output = output
             self._update_panel_image("相机原图", output["ref"], "已校正")
             self._update_panel_image("检测结果", output["final"], "BOX检测结果")
             self._update_panel_image("定位区域", output["ori"], "预处理结果")
@@ -289,31 +292,77 @@ class Dashboard(Frame):
                 )
             else:
                 self.status_var.set("未检测到BOX")
-                self._reset_result_fields()
-                self.status_var.set("未检测到BOX")
+                self.offset_x_var.set("--")
+                self.offset_y_var.set("--")
+                self.theta_var.set("--")
+                self.rmse_var.set("--")
+                self.width_var.set("--")
+                self.length_var.set("--")
+                self.area_var.set("--")
+                self.last_result = None
                 self._append_log("处理完成，但未检测到BOX")
         except Exception as exc:
             self.status_var.set("处理失败")
+            self.last_output = None
+            self.last_result = None
             self._append_log(f"图像处理失败: {exc}")
 
+    @staticmethod
+    def _save_image(path, img):
+        if img is None:
+            return False
+        arr = img
+        if len(arr.shape) == 3 and arr.shape[2] == 1:
+            arr = arr[:, :, 0]
+        return bool(cv2.imwrite(str(path), arr))
+
     def _on_save_result(self):
-        if self.last_result is None:
-            self._append_log("没有可保存的检测结果")
+        image_map = {}
+        if self.last_output is not None:
+            image_map.update(
+                {
+                    "raw.png": self.last_output.get("raw"),
+                    "undistorted.png": self.last_output.get("undistorted"),
+                    "projected.png": self.last_output.get("projected"),
+                    "ori.png": self.last_output.get("ori"),
+                    "ref.png": self.last_output.get("ref"),
+                    "preprocess.png": self.last_output.get("preprocess"),
+                    "final.png": self.last_output.get("final"),
+                }
+            )
+        elif self.last_frame is not None:
+            image_map["raw.png"] = self.last_frame
+
+        has_meaningful_result = self.last_result is not None
+        has_meaningful_image = any(img is not None for img in image_map.values())
+        if not has_meaningful_result and not has_meaningful_image:
+            self._append_log("没有可保存的有效内容（无图像、无结果）")
             return
 
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        img_dir = RESULTS_DIR / f"img_{now}"
+        img_dir.mkdir(parents=True, exist_ok=True)
+
+        saved_count = 0
+        for filename, img in image_map.items():
+            if self._save_image(img_dir / filename, img):
+                saved_count += 1
+
+        process_status = self.status_var.get().strip()
         payload = {
             "time": now,
             "batch_id": self.info_vars["批次号"].get(),
             "roll_id": self.info_vars["卷号"].get(),
             "operator": self.info_vars["操作员"].get(),
+            "status": process_status,
+            "image_dir": img_dir.name,
             "result": self.last_result,
         }
         out_file = RESULTS_DIR / f"result_{now}.json"
         with open(out_file, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
-        self._append_log(f"结果已保存: {out_file.name}")
+        self._append_log(f"结果已保存: {out_file.name}，过程图像 {saved_count}/7 张，目录 {img_dir.name}")
 
     def _on_clear(self):
         self._reset_result_fields()

@@ -238,7 +238,7 @@ class MainWindow(Toplevel):
 
     def _print_font_diagnostics(self):
         available = list(tkfont.families(self))
-        print(available)
+        # print(available)
         available_l = [f.lower() for f in available]
         key_hits = [f for f in available if any(k in f.lower() for k in ["yahei", "wenquanyi", "noto", "source han", "song", "fangsong", "gothic", "mincho"]) ]
 
@@ -250,8 +250,8 @@ class MainWindow(Toplevel):
             pass
 
         print(f"[AituEyes] UI font family: {self.ui_font_family}")
-        print(f"[AituEyes] Tk windowing={windowing_system}, DISPLAY={os.environ.get('DISPLAY', '')}, NoMachine={is_nomachine}")
-        print(f"[AituEyes] Tk families={len(available)}, CJK-like hits={key_hits[:12]}")
+        # print(f"[AituEyes] Tk windowing={windowing_system}, DISPLAY={os.environ.get('DISPLAY', '')}, NoMachine={is_nomachine}")
+        # print(f"[AituEyes] Tk families={len(available)}, CJK-like hits={key_hits[:12]}")
 
         # If NoMachine is active and YaHei is not visible to Tk, point out likely root cause.
         if is_nomachine and not any("yahei" in f for f in available_l):
