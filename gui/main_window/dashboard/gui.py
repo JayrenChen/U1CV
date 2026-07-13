@@ -265,9 +265,12 @@ class Dashboard(Frame):
             self.status_var.set("等待采集")
             return
 
+        auto_save_on_process = False
         try:
             if self.controller is not None:
-                self.processor.apply_settings(self.controller.get_runtime_settings())
+                runtime_settings = self.controller.get_runtime_settings()
+                self.processor.apply_settings(runtime_settings)
+                auto_save_on_process = bool(runtime_settings.get("auto_save_on_process", False))
 
             output = self.processor.process(self.last_frame)
             self.last_output = output
@@ -306,6 +309,9 @@ class Dashboard(Frame):
             self.last_output = None
             self.last_result = None
             self._append_log(f"图像处理失败: {exc}")
+
+        if auto_save_on_process:
+            self._on_save_result()
 
     @staticmethod
     def _save_image(path, img):

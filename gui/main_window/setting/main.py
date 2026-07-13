@@ -45,12 +45,18 @@ class Setting(Frame):
 
         container.columnconfigure(0, weight=1)
         container.columnconfigure(1, weight=1)
+        # container.rowconfigure(0, weight=1)
+        # container.rowconfigure(1, weight=1)
+        # container.rowconfigure(2, weight=1)
 
         cam_card = ttk.LabelFrame(container, text="相机参数", style="Panel.TLabelframe", padding=12)
-        cam_card.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(0, 8))
+        cam_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=(0, 6))
+
+        log_card = ttk.LabelFrame(container, text="日志设置", style="Panel.TLabelframe", padding=12)
+        log_card.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(0, 6))
 
         alg_card = ttk.LabelFrame(container, text="算法参数", style="Panel.TLabelframe", padding=12)
-        alg_card.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(0, 8))
+        alg_card.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=(6, 0), pady=(0, 6))
 
         save_card = ttk.LabelFrame(container, text="系统设置", style="Panel.TLabelframe", padding=12)
         save_card.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
@@ -72,6 +78,7 @@ class Setting(Frame):
             "HSV上界H": StringVar(value="360"),
             "HSV上界S": StringVar(value="100"),
             "HSV上界V": StringVar(value="100"),
+            "自动保存": StringVar(value="否"),
         }
 
         cam_fields = ["曝光时间(us)"]
@@ -81,6 +88,17 @@ class Setting(Frame):
             ttk.Label(cam_card, text=key + ":", style="Key.TLabel").grid(row=i, column=0, sticky="w", pady=5, padx=(0, 8))
             ttk.Entry(cam_card, textvariable=self.setting_vars[key]).grid(row=i, column=1, sticky="ew", pady=5)
         cam_card.columnconfigure(1, weight=1)
+
+        ttk.Label(log_card, text="自动保存:", style="Key.TLabel").grid(row=0, column=0, sticky="w", pady=5, padx=(0, 8))
+        auto_save_combo = ttk.Combobox(
+            log_card,
+            textvariable=self.setting_vars["自动保存"],
+            values=["是", "否"],
+            state="readonly",
+            width=8,
+        )
+        auto_save_combo.grid(row=0, column=1, sticky="w", pady=5)
+        log_card.columnconfigure(1, weight=1)
 
         for i, key in enumerate(alg_fields):
             ttk.Label(alg_card, text=key + ":", style="Key.TLabel").grid(row=i, column=0, sticky="w", pady=5, padx=(0, 8))
@@ -182,6 +200,7 @@ class Setting(Frame):
             "fabric_color_mode": self.setting_vars["识别模式"].get(),
             "hsv_lower": hsv_lower,
             "hsv_upper": hsv_upper,
+            "auto_save_on_process": self.setting_vars["自动保存"].get() == "是",
         }
 
     def _fill_vars(self, settings):
@@ -195,6 +214,7 @@ class Setting(Frame):
         self.setting_vars["布料类型"].set(str(settings.get("fabric_type", "矩形布料")))
         self.setting_vars["偏移估计模式"].set(str(settings.get("offset_estimation_mode", "中心点偏差估计")))
         self.setting_vars["识别模式"].set(str(settings.get("fabric_color_mode", "黑白布料")))
+        self.setting_vars["自动保存"].set("是" if bool(settings.get("auto_save_on_process", False)) else "否")
 
         hsv_lower = settings.get("hsv_lower", [0, 0, 0])
         hsv_upper = settings.get("hsv_upper", [360, 100, 100])
@@ -263,6 +283,7 @@ class Setting(Frame):
             "fabric_color_mode": "黑白布料",
             "hsv_lower": [0, 0, 0],
             "hsv_upper": [360, 100, 100],
+            "auto_save_on_process": False,
         }
         self._fill_vars(defaults)
         if self.controller is not None:

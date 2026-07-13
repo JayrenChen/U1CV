@@ -9,6 +9,7 @@ from tkinter import Toplevel, Frame, Canvas, Button
 from tkinter import ttk
 
 from gui.main_window.dashboard.gui import Dashboard
+from gui.main_window.replay.gui import Replay
 from gui.main_window.setting.main import Setting
 from gui.camera_interface import CameraInterface
 
@@ -76,10 +77,12 @@ class MainWindow(Toplevel):
             "fabric_color_mode": "黑白布料",
             "hsv_lower": [0, 0, 0],
             "hsv_upper": [360, 100, 100],
+            "auto_save_on_process": False,
         }
         self.runtime_settings = self._load_runtime_settings()
         self.logo_full = None
         self.logo_home = None
+        self.logo_replay = None
         self.logo_setting = None
         self._register_local_ui_fonts()
         self.ui_font_family = self._resolve_ui_font_family()
@@ -313,6 +316,7 @@ class MainWindow(Toplevel):
                 self.logo_full = tk.PhotoImage(file=str(LOGO_PATH))
                 self.logo_home = tk.PhotoImage(file=str(ICON_HOME_PATH))
                 self.logo_home = self.logo_home.subsample(8, 8)
+                self.logo_replay = self.logo_home
                 self.logo_setting = tk.PhotoImage(file=str(ICON_SETTING_PATH))
                 self.logo_setting = self.logo_setting.subsample(8, 8)
                 logo_label = tk.Label(sidebar, image=self.logo_full, bg=self.palette["bg_logo"], bd=0, highlightthickness=0)
@@ -320,6 +324,7 @@ class MainWindow(Toplevel):
             except Exception:
                 self.logo_full = None
                 self.logo_home = None
+                self.logo_replay = None
                 self.logo_setting = None
 
         self.sidebar_indicator = Frame(sidebar, background=self.palette["indicator"])
@@ -341,6 +346,22 @@ class MainWindow(Toplevel):
         )
         self.dashboard_btn.place(x=20, y=130, width=150, height=46)
 
+        self.replay_btn = Button(
+            sidebar,
+            text="  回放",
+            image=self.logo_replay,
+            compound="left",
+            fg="white",
+            bg=self.palette["bg_sidebar"],
+            bd=0,
+            relief="flat",
+            font=(self.ui_font_family, 14, "bold"),
+            activebackground=self.palette["bg_sidebar_active"],
+            activeforeground="white",
+            command=lambda: self.handle_btn_press("replay", 182),
+        )
+        self.replay_btn.place(x=20, y=182, width=150, height=46)
+
         self.setting_btn = Button(
             sidebar,
             text="  设置",
@@ -353,12 +374,13 @@ class MainWindow(Toplevel):
             font=(self.ui_font_family, 14, "bold"),
             activebackground=self.palette["bg_sidebar_active"],
             activeforeground="white",
-            command=lambda: self.handle_btn_press("set", 182),
+            command=lambda: self.handle_btn_press("set", 234),
         )
-        self.setting_btn.place(x=20, y=182, width=150, height=46)
+        self.setting_btn.place(x=20, y=234, width=150, height=46)
 
         self.windows = {
             "dash": Dashboard(self.content_area, controller=self),
+            "replay": Replay(self.content_area, controller=self),
             "set": Setting(self.content_area, controller=self),
         }
 
@@ -410,6 +432,7 @@ class MainWindow(Toplevel):
         merged["fabric_type"] = str(merged.get("fabric_type", "矩形布料"))
         merged["offset_estimation_mode"] = str(merged.get("offset_estimation_mode", "中心点偏差估计"))
         merged["fabric_color_mode"] = str(merged.get("fabric_color_mode", "黑白布料"))
+        merged["auto_save_on_process"] = bool(merged.get("auto_save_on_process", False))
 
         hsv_lower = merged.get("hsv_lower", [0, 0, 0])
         hsv_upper = merged.get("hsv_upper", [360, 100, 100])
