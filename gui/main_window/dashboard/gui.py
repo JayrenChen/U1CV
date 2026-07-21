@@ -79,7 +79,7 @@ class Dashboard(Frame):
         panel_titles = [
             "相机原图",
             "检测结果",
-            "定位区域",
+            "图像校准",
             "二值图像",
         ]
 
@@ -115,7 +115,7 @@ class Dashboard(Frame):
         self.image_panel_map = {
             "相机原图": self.image_canvases[0],
             "检测结果": self.image_canvases[1],
-            "定位区域": self.image_canvases[2],
+            "图像校准": self.image_canvases[2],
             "二值图像": self.image_canvases[3],
         }
 
@@ -274,9 +274,9 @@ class Dashboard(Frame):
 
             output = self.processor.process(self.last_frame)
             self.last_output = output
-            self._update_panel_image("相机原图", output["ref"], "已校正")
+            # self._update_panel_image("相机原图", output["ref"], "已校正")
             self._update_panel_image("检测结果", output["final"], "BOX检测结果")
-            self._update_panel_image("定位区域", output["ori"], "预处理结果")
+            self._update_panel_image("图像校准", output["projected"], "预处理结果")
             self._update_panel_image("二值图像", output["preprocess"], "阈值分割图")
 
             if output["found"]:
