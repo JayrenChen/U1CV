@@ -1,12 +1,14 @@
 ﻿from pathlib import Path
 from typing import Optional
+import json
 
 import cv2
 import numpy as np
 
 BASE_DIR = Path(__file__).resolve().parent
 PARAMS_PATH = BASE_DIR / "camera_params_all.npz"
-REF_OBJ_PATH = BASE_DIR / "ref_obj_mm.npz"
+REF_OBJ_JSON_PATH = BASE_DIR / "ref_obj_mm.json"
+REF_OBJ_NPZ_PATH = BASE_DIR / "ref_obj_mm.npz"
 
 
 class ProcessingEngine:
@@ -14,7 +16,7 @@ class ProcessingEngine:
 
     def __init__(self, params_path: Optional[Path] = None, ref_obj_path: Optional[Path] = None, settings: Optional[dict] = None):
         self.params_path = Path(params_path) if params_path is not None else PARAMS_PATH
-        self.ref_obj_path = Path(ref_obj_path) if ref_obj_path is not None else REF_OBJ_PATH
+        self.ref_obj_path = Path(ref_obj_path) if ref_obj_path is not None else REF_OBJ_JSON_PATH
 
         self._params = None
         self._ref_obj = None
@@ -61,11 +63,19 @@ class ProcessingEngine:
             self._params = None
 
     def _load_ref_obj(self):
-        if not self.ref_obj_path.exists():
-            self._ref_obj = None
-            return
+        path = self.ref_obj_path
+        if not path.exists():
+            alt_path = REF_OBJ_NPZ_PATH if path.suffix.lower() == ".json" else REF_OBJ_JSON_PATH
+            if alt_path.exists():
+                path = alt_path
+            else:
+                self._ref_obj = None
+                return
         try:
-            self._ref_obj = np.load(str(self.ref_obj_path))
+            if path.suffix.lower() == ".json":
+                self._ref_obj = json.loads(path.read_text(encoding="utf-8"))
+            else:
+                self._ref_obj = np.load(str(path), allow_pickle=True)
         except Exception:
             self._ref_obj = None
 
@@ -76,10 +86,14 @@ class ProcessingEngine:
         self._recompute_projection()
 
     def _load_reference_box(self):
-        if self._ref_obj is not None and "box_mm" in self._ref_obj.files:
+        if isinstance(self._ref_obj, dict) and "box_mm" in self._ref_obj:
             pts = np.asarray(self._ref_obj["box_mm"], dtype=np.float32).reshape(-1, 2)
             if pts.shape[0] >= 4:
-                return self._order_box_points(pts[:4])*1.02
+                return self._order_box_points(pts[:4])
+        if self._ref_obj is not None and hasattr(self._ref_obj, "files") and "box_mm" in self._ref_obj.files:
+            pts = np.asarray(self._ref_obj["box_mm"], dtype=np.float32).reshape(-1, 2)
+            if pts.shape[0] >= 4:
+                return self._order_box_points(pts[:4])
         return np.array([[0, 0], [40, 0], [40, 40], [0, 40]], dtype=np.float32)
 
     def apply_settings(self, settings: dict):
@@ -193,6 +207,7 @@ class ProcessingEngine:
         cv2.polylines(img_, [points], isClosed=True, color=color, thickness=thickness)
         return img_
     
+    # 检测坐标系原点，返回原点坐标和旋转角度（像素结果）
     def _detect_ori(self, img: np.ndarray):
         x = int(self.anchor_xmm * self.ppm)
         y = int(self.anchor_ymm * self.ppm)
@@ -284,8 +299,10 @@ class ProcessingEngine:
 
         c_ref = ref.mean(axis=0)
         c_det = det.mean(axis=0)
+        print(f"Reference points: {ref}, Detected points: {det}")
         X = ref - c_ref
         Y = det - c_det
+        print(f"Centered reference points: {X}, Centered detected points: {Y}")
 
         H = X.T @ Y
         U, _, Vt = np.linalg.svd(H)
@@ -293,33 +310,45 @@ class ProcessingEngine:
         if np.linalg.det(R) < 0:
             Vt[-1, :] *= -1
             R = Vt.T @ U.T
-
-        if offset_mode == "左上端点偏差估计":
-            ref_anchor = ref[0]
-            det_anchor = det[0]
-        elif offset_mode == "右下端点偏差估计":
-            ref_anchor = ref[2]
-            det_anchor = det[2]
-        else:
-            ref_anchor = c_ref
-            det_anchor = c_det
-
-        t = det_anchor - (R @ ref_anchor)
+        
+        t = c_det - (R @ c_ref)
         pred = (R @ ref.T).T + t
         err = pred - det
         rmse = float(np.sqrt(np.mean(np.sum(err * err, axis=1))))
 
+        # d = c_det - c_ref
+        if offset_mode == "左上端点偏差估计":
+            d = det[0] - ref[0]
+        elif offset_mode == "右上端点偏差估计":
+            d = det[1] - ref[1]
+        else:
+            d = c_det - c_ref
+
         theta_deg = float(np.degrees(np.arctan2(R[1, 0], R[0, 0])))
         theta_deg = ((theta_deg + 90.0) % 180.0) - 90.0
-        return float(t[0]), float(t[1]), theta_deg, rmse
+        return float(d[0]), float(d[1]), theta_deg, rmse
 
-    def _to_local_coord_offset_mm(self, dx_mm: float, dy_mm: float):
+    def _to_local_coord(self, x_px: float, y_px: float):
+        # Convert image pixel coordinate to local real coordinate (mm) under detected origin.
+        dx_mm = (float(x_px) - float(self.ori[0])) / max(self.ppm, 1e-6)
+        dy_mm = (float(y_px) - float(self.ori[1])) / max(self.ppm, 1e-6)
         theta = np.deg2rad(float(self.ori[2]) if len(self.ori) >= 3 else 0.0)
         ux = np.array([np.cos(theta), np.sin(theta)], dtype=np.float64)
         uy = np.array([-np.sin(theta), np.cos(theta)], dtype=np.float64)
         v = np.array([dx_mm, dy_mm], dtype=np.float64)
         # Project image-axis offset to the detected local coordinate basis.
         return float(np.dot(v, ux)), float(np.dot(v, uy))
+    
+    def _to_image_coord(self, x_mm: float, y_mm: float):
+        theta = np.deg2rad(float(self.ori[2]) if len(self.ori) >= 3 else 0.0)
+        ux = np.array([np.cos(theta), np.sin(theta)], dtype=np.float64)
+        uy = np.array([-np.sin(theta), np.cos(theta)], dtype=np.float64)
+        v_local = np.array([x_mm, y_mm], dtype=np.float64)
+        # Convert local real coordinate (mm) to absolute image pixel coordinate.
+        v_img = v_local[0] * ux + v_local[1] * uy
+        x_px = float(self.ori[0]) + float(v_img[0]) * max(self.ppm, 1e-6)
+        y_px = float(self.ori[1]) + float(v_img[1]) * max(self.ppm, 1e-6)
+        return x_px, y_px
 
     def process(self, frame: np.ndarray) -> dict:
         # 1. 图像变换（去畸变+透视变换）
@@ -327,7 +356,7 @@ class ProcessingEngine:
         im_proj = self._project(im_undist)
         # 2. 寻找坐标系原点+绘制参考区域（TODO：寻找原点不鲁棒）
         self.ori, im_ori_crop = self._detect_ori(im_proj)
-        box_ref_px = self.box_ref * self.ppm + np.array([self.ori[0], self.ori[1]], dtype=np.float32)
+        box_ref_px = np.array([self._to_image_coord(float(p[0]), float(p[1])) for p in self.box_ref], dtype=np.float32)
         im_ref = self.draw_ref_box(self.draw_ori(im_proj), box_ref_px)
         # 3. 图像预处理(灰度+滤波+二值化+最大联通+闭运算)
         im_pre = self._preprocess(im_proj)
@@ -352,12 +381,12 @@ class ProcessingEngine:
             dx, dy, theta, rmse = self._estimate_transfer(box_ref_px, box_detected, self.offset_estimation_mode)
             rect = cv2.minAreaRect(box_detected.astype(np.float32))
             w_px, h_px = rect[1]
-            width_mm = float(min(w_px, h_px) / max(self.ppm, 1e-6))
+            width_mm  = float(min(w_px, h_px) / max(self.ppm, 1e-6))
             length_mm = float(max(w_px, h_px) / max(self.ppm, 1e-6))
             area_mm2 = float(cv2.contourArea(box_detected.astype(np.float32)) / max(self.ppm * self.ppm, 1e-6))
-            dx_mm_img = float(dx / max(self.ppm, 1e-6))
-            dy_mm_img = float(dy / max(self.ppm, 1e-6))
-            dx_mm_local, dy_mm_local = self._to_local_coord_offset_mm(dx_mm_img, dy_mm_img)
+            x_img = float(self.ori[0] + dx)
+            y_img = float(self.ori[1] + dy)
+            dx_mm_local, dy_mm_local = self._to_local_coord(x_img, y_img)
 
             result.update(
                 {
@@ -381,7 +410,7 @@ class ProcessingEngine:
             "ori": im_ori_crop,
             "ref": im_ref,
             "preprocess": im_pre,
-            "final": im_final[0:800,:],
+            "final": im_final,
             "found": found,
             "result": result,
             "origin": self.ori,

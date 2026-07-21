@@ -4,7 +4,7 @@
   "ppm": 5.0,
   "topview_x_min_mm": -30.0,
   "topview_x_max_mm": 270.0,
-  "topview_y_min_mm": -20.0,
+  "topview_y_min_mm": -25.0,
   "topview_y_max_mm": 180.0,
   "anchor_xmm": 10.0,
   "anchor_ymm": 0.0,
@@ -14,21 +14,22 @@
   "calib_pattern_rows": 8,
   "calib_square_size_mm": 15.0,
   "fabric_type": "矩形布料",
-  "offset_estimation_mode": "中心点偏差估计",
-  "fabric_color_mode": "黑白布料",
+  "offset_estimation_mode": "左上端点偏差估计",
+  "fabric_color_mode": "彩色布料",
   "hsv_lower": [
-    240,
+    260,
     10,
-    20
+    60
   ],
   "hsv_upper": [
     280,
     80,
-    80
+    100
   ],
   "auto_save_on_process": false,
   "light_serial_port": "COM3",
   "light_baudrate": 19200,
-  "light_intensity": 50,
-  "light_enabled": true
+  "light_intensity": 40,
+  "light_enabled": true,
+  "runtime_platform": "windows"
 }

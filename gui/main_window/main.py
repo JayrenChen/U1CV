@@ -58,14 +58,15 @@ class MainWindow(Toplevel):
         Toplevel.__init__(self, root, *args, **kwargs)
 
         self.title("杰克艾图 - 工业布料检测系统")
-        self.geometry("1400x860")
-        self.minsize(1200, 760)
+        self.geometry("1600x900")
+        self.minsize(1200, 800)
         self.iconphoto(False, tk.PhotoImage(file=str(LOGO_ICON_PATH)))
         self.configure(bg="#FFF4EC")
 
         self.current_window = None
         self.camera = None
         self.light_controller = LightSourceController()
+        self.default_light_serial_port = "/dev/ttyUSB0" if platform.system().lower() == "linux" else ""
         self.settings_path = SETTINGS_PATH
         self.default_settings = {
             "exposure_us": 50000.0,
@@ -88,7 +89,7 @@ class MainWindow(Toplevel):
             "hsv_lower": [0, 0, 0],
             "hsv_upper": [360, 100, 100],
             "auto_save_on_process": False,
-            "light_serial_port": "",
+            "light_serial_port": self.default_light_serial_port,
             "light_baudrate": 19200,
             "light_intensity": 50,
             "light_enabled": False,
@@ -148,6 +149,24 @@ class MainWindow(Toplevel):
         self._wire_event_loggers()
         self.apply_runtime_settings(self.runtime_settings)
         self.protocol("WM_DELETE_WINDOW", self._on_window_close)
+
+    def _normalize_light_serial_port(self, port_value):
+        port = str(port_value or "").strip()
+        os_name = platform.system().lower()
+
+        if os_name == "linux":
+            # Ignore Windows-style COM settings when running on Linux.
+            if not port or port.upper().startswith("COM"):
+                return "/dev/ttyUSB0"
+            return port
+
+        if os_name == "windows":
+            # Ignore Linux-style device paths when running on Windows.
+            if port.startswith("/dev/"):
+                return ""
+            return port
+
+        return port
 
     def _resolve_ui_font_family(self):
         available = list(tkfont.families(self))
@@ -479,6 +498,7 @@ class MainWindow(Toplevel):
     def _load_runtime_settings(self):
         settings = dict(self.default_settings)
         if not self.settings_path.exists():
+            settings["runtime_platform"] = platform.system().lower()
             return settings
         try:
             with open(self.settings_path, "r", encoding="utf-8") as f:
@@ -487,6 +507,14 @@ class MainWindow(Toplevel):
                 settings.update(loaded)
         except Exception:
             pass
+
+        current_platform = platform.system().lower()
+        saved_platform = str(settings.get("runtime_platform", "")).strip().lower()
+        if saved_platform and saved_platform != current_platform:
+            settings["light_serial_port"] = self.default_light_serial_port
+
+        settings["light_serial_port"] = self._normalize_light_serial_port(settings.get("light_serial_port", ""))
+        settings["runtime_platform"] = current_platform
         return settings
 
     def get_runtime_settings(self):
@@ -528,7 +556,8 @@ class MainWindow(Toplevel):
         merged["offset_estimation_mode"] = str(merged.get("offset_estimation_mode", "中心点偏差估计"))
         merged["fabric_color_mode"] = str(merged.get("fabric_color_mode", "黑白布料"))
         merged["auto_save_on_process"] = bool(merged.get("auto_save_on_process", False))
-        merged["light_serial_port"] = str(merged.get("light_serial_port", "")).strip()
+        merged["light_serial_port"] = self._normalize_light_serial_port(merged.get("light_serial_port", ""))
+        merged["runtime_platform"] = platform.system().lower()
         merged["light_baudrate"] = _clamp_int(merged.get("light_baudrate", 19200), 1200, 921600)
         merged["light_intensity"] = _clamp_int(merged.get("light_intensity", 50), 0, 255)
         merged["light_enabled"] = bool(merged.get("light_enabled", False))
