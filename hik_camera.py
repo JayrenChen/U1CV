@@ -21,11 +21,12 @@ class HikCamera:
     PIXEL_BAYER_GB8 = 17301514
     PIXEL_RGB8_PACKED = 35127316
 
-    def __init__(self, device_index=0, pixel_format=PIXEL_BAYER_RG8):
+    def __init__(self, device_index=0, pixel_format=PIXEL_BAYER_RG8, logger=None):
         # 指定要连接的相机序号，默认连接枚举到的第一台。
         self.device_index = device_index
         # 默认使用 BayerRG8，后续由 OpenCV 完成去马赛克。
         self.pixel_format = pixel_format
+        self._logger = logger or print
 
         self.camera = None
         self.device_list = MV_CC_DEVICE_INFO_LIST()
@@ -40,6 +41,12 @@ class HikCamera:
         """将 SDK 返回值统一转换为 Python 异常，便于定位问题。"""
         if ret != 0:
             raise RuntimeError(f"[HK-CAMERA] {action}失败，错误码: {ret}")
+
+    def _log(self, message):
+        try:
+            self._logger(message)
+        except Exception:
+            print(message)
 
     def _get_int_value(self, name):
         """读取整型参数节点，例如图像宽高、PayloadSize。"""
@@ -113,7 +120,7 @@ class HikCamera:
         ret = MvCamera.MV_CC_EnumDevices(n_layer_type, self.device_list)
         self._check_ret(ret, "枚举设备")
 
-        print(f"[HK-CAMERA] 找到 {self.device_list.nDeviceNum} 台设备")
+        self._log(f"[HK-CAMERA] 找到 {self.device_list.nDeviceNum} 台设备")
         if self.device_list.nDeviceNum == 0:
             raise RuntimeError("[HK-CAMERA] 未找到设备")
         if self.device_index >= self.device_list.nDeviceNum:
@@ -138,7 +145,7 @@ class HikCamera:
         self.payload_size = self._get_int_value("PayloadSize")
         self.width = self._get_int_value("Width")
         self.height = self._get_int_value("Height")
-        print(f"[HK-CAMERA] 分辨率: {self.width}x{self.height}")
+        self._log(f"[HK-CAMERA] 分辨率: {self.width}x{self.height}")
 
         self.set_pixel_format(self.pixel_format)
         return self
@@ -155,7 +162,7 @@ class HikCamera:
         st_enum = MVCC_ENUMVALUE()
         ret = self.camera.MV_CC_GetEnumValue("PixelFormat", st_enum)
         if ret == 0:
-            print(f"[HK-CAMERA] 当前 PixelFormat: {st_enum.nCurValue}")
+            self._log(f"[HK-CAMERA] 当前 PixelFormat: {st_enum.nCurValue}")
 
     def set_exposure(self, exposure_time_us):
         """

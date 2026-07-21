@@ -63,6 +63,10 @@ class Setting(Frame):
 
         self.setting_vars = {
             "曝光时间(us)": StringVar(value="50000"),
+            "光源串口": StringVar(value=""),
+            "光源波特率": StringVar(value="19200"),
+            "光源强度": StringVar(value="50"),
+            "光源开关": StringVar(value="关"),
             "二值阈值": StringVar(value="60"),
             "PPM": StringVar(value="5.0"),
             "俯视X最小(mm)": StringVar(value="-30.0"),
@@ -88,7 +92,6 @@ class Setting(Frame):
             "自动保存": StringVar(value="否"),
         }
 
-        cam_fields = ["曝光时间(us)"]
         alg_fields = [
             "二值阈值",
             "PPM",
@@ -105,10 +108,36 @@ class Setting(Frame):
             "标定格子边长(mm)",
         ]
 
-        for i, key in enumerate(cam_fields):
-            ttk.Label(cam_card, text=key + ":", style="Key.TLabel").grid(row=i, column=0, sticky="w", pady=5, padx=(0, 8))
-            ttk.Entry(cam_card, textvariable=self.setting_vars[key]).grid(row=i, column=1, sticky="ew", pady=5)
+        ttk.Label(cam_card, text="曝光时间(us):", style="Key.TLabel").grid(row=0, column=0, sticky="w", pady=5, padx=(0, 8))
+        ttk.Entry(cam_card, textvariable=self.setting_vars["曝光时间(us)"]).grid(row=0, column=1, sticky="ew", pady=5)
+
+        ttk.Label(cam_card, text="光源串口:", style="Key.TLabel").grid(row=1, column=0, sticky="w", pady=5, padx=(0, 8))
+        self.light_port_combo = ttk.Combobox(cam_card, textvariable=self.setting_vars["光源串口"], state="readonly")
+        self.light_port_combo.grid(row=1, column=1, sticky="ew", pady=5)
+        ttk.Button(cam_card, text="刷新", command=self._refresh_light_ports).grid(row=1, column=2, sticky="w", padx=(8, 0), pady=5)
+
+        ttk.Label(cam_card, text="光源波特率:", style="Key.TLabel").grid(row=2, column=0, sticky="w", pady=5, padx=(0, 8))
+        self.light_baud_combo = ttk.Combobox(
+            cam_card,
+            textvariable=self.setting_vars["光源波特率"],
+            values=["19200", "9600", "4800", "2400", "57600", "115200"],
+            state="readonly",
+        )
+        self.light_baud_combo.grid(row=2, column=1, sticky="ew", pady=5)
+        ttk.Button(cam_card, text="在线检测", command=self._on_check_light_online).grid(row=2, column=2, sticky="w", padx=(8, 0), pady=5)
+
+        light_control_row = ttk.Frame(cam_card, style="Main.TFrame")
+        light_control_row.grid(row=3, column=1, sticky="w", pady=5)
+
+        ttk.Label(light_control_row, text="强度:", style="Key.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6))
+        self.light_intensity_spin = tk.Spinbox(light_control_row, from_=0, to=255, textvariable=self.setting_vars["光源强度"], width=8)
+        self.light_intensity_spin.grid(row=0, column=1, sticky="w", padx=(0, 14))
+
+        ttk.Label(light_control_row, text="开关:", style="Key.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 6))
+        self.light_switch_combo = ttk.Combobox(light_control_row, textvariable=self.setting_vars["光源开关"], values=["开", "关"], state="readonly", width=8)
+        self.light_switch_combo.grid(row=0, column=3, sticky="w")
         cam_card.columnconfigure(1, weight=1)
+        cam_card.columnconfigure(2, weight=0)
 
         ttk.Label(log_card, text="自动保存:", style="Key.TLabel").grid(row=0, column=0, sticky="w", pady=5, padx=(0, 8))
         auto_save_combo = ttk.Combobox(
@@ -191,6 +220,33 @@ class Setting(Frame):
     def _clamp_int(value, low, high):
         return max(low, min(high, int(value)))
 
+    def _get_light_port_options(self):
+        ports = []
+        if self.controller is not None and hasattr(self.controller, "get_light_serial_ports"):
+            try:
+                ports = list(self.controller.get_light_serial_ports())
+            except Exception:
+                ports = []
+        current_port = self.setting_vars.get("光源串口").get().strip() if "光源串口" in self.setting_vars else ""
+        if current_port and current_port not in ports:
+            ports = [current_port] + ports
+        return ports
+
+    def _refresh_light_ports(self):
+        ports = self._get_light_port_options()
+        if hasattr(self, "light_port_combo"):
+            self.light_port_combo.configure(values=ports)
+
+        current_port = self.setting_vars["光源串口"].get().strip()
+        if not current_port and ports:
+            current_port = ports[0]
+        if current_port and current_port not in ports:
+            ports = [current_port] + ports
+            if hasattr(self, "light_port_combo"):
+                self.light_port_combo.configure(values=ports)
+        if current_port:
+            self.setting_vars["光源串口"].set(current_port)
+
     def _update_color_inputs_state(self):
         is_color_mode = self.setting_vars["识别模式"].get() == "彩色布料"
         state = "normal" if is_color_mode else "disabled"
@@ -210,6 +266,10 @@ class Setting(Frame):
         ]
         return {
             "exposure_us": float(self.setting_vars["曝光时间(us)"].get()),
+            "light_serial_port": self.setting_vars["光源串口"].get().strip(),
+            "light_baudrate": int(float(self.setting_vars["光源波特率"].get())),
+            "light_intensity": self._clamp_int(self.setting_vars["光源强度"].get(), 0, 255),
+            "light_enabled": self.setting_vars["光源开关"].get() == "开",
             "bin_thresh": float(self.setting_vars["二值阈值"].get()),
             "ppm": float(self.setting_vars["PPM"].get()),
             "topview_x_min_mm": float(self.setting_vars["俯视X最小(mm)"].get()),
@@ -232,7 +292,15 @@ class Setting(Frame):
         }
 
     def _fill_vars(self, settings):
+        self._refresh_light_ports()
         self.setting_vars["曝光时间(us)"].set(str(settings.get("exposure_us", 50000)))
+        light_port = str(settings.get("light_serial_port", "")).strip()
+        if not light_port:
+            light_port = self.setting_vars["光源串口"].get().strip()
+        self.setting_vars["光源串口"].set(light_port)
+        self.setting_vars["光源波特率"].set(str(settings.get("light_baudrate", 19200)))
+        self.setting_vars["光源强度"].set(str(self._clamp_int(settings.get("light_intensity", 50), 0, 255)))
+        self.setting_vars["光源开关"].set("开" if bool(settings.get("light_enabled", False)) else "关")
         self.setting_vars["二值阈值"].set(str(settings.get("bin_thresh", 60)))
         self.setting_vars["PPM"].set(str(settings.get("ppm", 5.0)))
         self.setting_vars["俯视X最小(mm)"].set(str(settings.get("topview_x_min_mm", -30.0)))
@@ -294,6 +362,15 @@ class Setting(Frame):
         self._fill_vars(settings)
         messagebox.showinfo("参数设置", "配置已加载")
 
+    def _on_check_light_online(self):
+        if self.controller is None:
+            return
+        try:
+            online = bool(self.controller.check_light_online(self._collect_settings()))
+            messagebox.showinfo("光源控制", "控制器在线" if online else "控制器未响应")
+        except Exception as exc:
+            messagebox.showerror("光源控制", f"在线检测失败: {exc}")
+
     def _on_save_config(self):
         if self.controller is None:
             return
@@ -326,6 +403,10 @@ class Setting(Frame):
             "hsv_lower": [0, 0, 0],
             "hsv_upper": [360, 100, 100],
             "auto_save_on_process": False,
+            "light_serial_port": "",
+            "light_baudrate": 19200,
+            "light_intensity": 50,
+            "light_enabled": False,
         }
         self._fill_vars(defaults)
         if self.controller is not None:

@@ -1,9 +1,10 @@
 class CameraInterface:
     """Lightweight camera adapter for HikCamera single-shot capture."""
 
-    def __init__(self, device_index=0, exposure=50000):
+    def __init__(self, device_index=0, exposure=50000, logger=None):
         self.device_index = device_index
         self.exposure = exposure
+        self._logger = logger or print
         self._camera = None
         self._is_ready = False
 
@@ -13,7 +14,7 @@ class CameraInterface:
 
         from hik_camera import HikCamera
 
-        self._camera = HikCamera(device_index=self.device_index)
+        self._camera = HikCamera(device_index=self.device_index, logger=self._logger)
         self._camera.open()
         self._camera.set_exposure(self.exposure)
         self._camera.start_grabbing()

@@ -13,6 +13,7 @@ from gui.main_window.debug.gui import DebugPage
 from gui.main_window.replay.gui import Replay
 from gui.main_window.setting.main import Setting
 from gui.camera_interface import CameraInterface
+from gui.light_source_controller import LightSourceController
 
 OUTPUT_PATH = Path(__file__).parent
 ASSETS_PATH = OUTPUT_PATH / Path("./assets")
@@ -64,6 +65,7 @@ class MainWindow(Toplevel):
 
         self.current_window = None
         self.camera = None
+        self.light_controller = LightSourceController()
         self.settings_path = SETTINGS_PATH
         self.default_settings = {
             "exposure_us": 50000.0,
@@ -86,6 +88,10 @@ class MainWindow(Toplevel):
             "hsv_lower": [0, 0, 0],
             "hsv_upper": [360, 100, 100],
             "auto_save_on_process": False,
+            "light_serial_port": "",
+            "light_baudrate": 19200,
+            "light_intensity": 50,
+            "light_enabled": False,
         }
         self.runtime_settings = self._load_runtime_settings()
         self.logo_full = None
@@ -139,6 +145,8 @@ class MainWindow(Toplevel):
 
         self._build_style()
         self._build_layout()
+        self._wire_event_loggers()
+        self.apply_runtime_settings(self.runtime_settings)
         self.protocol("WM_DELETE_WINDOW", self._on_window_close)
 
     def _resolve_ui_font_family(self):
@@ -411,6 +419,22 @@ class MainWindow(Toplevel):
 
         self.navigate("dash")
 
+    def _append_debug_log(self, message):
+        debug_page = self.windows.get("debug") if hasattr(self, "windows") else None
+        if debug_page is not None and hasattr(debug_page, "_append_log"):
+            try:
+                debug_page._append_log(message)
+            except Exception:
+                pass
+
+    def _emit_event_log(self, message):
+        print(message)
+        self._append_debug_log(message)
+
+    def _wire_event_loggers(self):
+        if hasattr(self, "light_controller") and self.light_controller is not None:
+            self.light_controller.set_logger(self._emit_event_log)
+
     def handle_btn_press(self, target, indicator_y):
         self.sidebar_indicator.place(x=0, y=indicator_y, height=46, width=6)
         self.navigate(target)
@@ -425,10 +449,32 @@ class MainWindow(Toplevel):
     def capture_single_image(self):
         exposure = float(self.runtime_settings.get("exposure_us", 50000.0))
         if self.camera is None:
-            self.camera = CameraInterface(device_index=0, exposure=exposure)
+            self.camera = CameraInterface(device_index=0, exposure=exposure, logger=self._emit_event_log)
         else:
             self.camera.update_exposure(exposure)
         return self.camera.capture_once()
+
+    def get_light_serial_ports(self):
+        try:
+            return LightSourceController.list_serial_ports()
+        except Exception:
+            return []
+
+    def check_light_online(self, settings=None):
+        if self.light_controller is None:
+            return False
+
+        runtime_settings = dict(self.runtime_settings)
+        if isinstance(settings, dict):
+            runtime_settings.update(settings)
+
+        light_port = str(runtime_settings.get("light_serial_port", "")).strip()
+        if not light_port:
+            return False
+
+        self.light_controller.port = light_port
+        self.light_controller.baudrate = int(runtime_settings.get("light_baudrate", 19200))
+        return bool(self.light_controller.check_online())
 
     def _load_runtime_settings(self):
         settings = dict(self.default_settings)
@@ -482,6 +528,10 @@ class MainWindow(Toplevel):
         merged["offset_estimation_mode"] = str(merged.get("offset_estimation_mode", "中心点偏差估计"))
         merged["fabric_color_mode"] = str(merged.get("fabric_color_mode", "黑白布料"))
         merged["auto_save_on_process"] = bool(merged.get("auto_save_on_process", False))
+        merged["light_serial_port"] = str(merged.get("light_serial_port", "")).strip()
+        merged["light_baudrate"] = _clamp_int(merged.get("light_baudrate", 19200), 1200, 921600)
+        merged["light_intensity"] = _clamp_int(merged.get("light_intensity", 50), 0, 255)
+        merged["light_enabled"] = bool(merged.get("light_enabled", False))
 
         hsv_lower = merged.get("hsv_lower", [0, 0, 0])
         hsv_upper = merged.get("hsv_upper", [360, 100, 100])
@@ -510,6 +560,21 @@ class MainWindow(Toplevel):
         self.runtime_settings = merged
         if self.camera is not None:
             self.camera.update_exposure(self.runtime_settings["exposure_us"])
+        self._sync_light_controller()
+
+    def _sync_light_controller(self):
+        if self.light_controller is None:
+            return
+        light_port = str(self.runtime_settings.get("light_serial_port", "")).strip()
+        if not light_port:
+            return
+        self.light_controller.apply_settings(
+            port=light_port,
+            baudrate=self.runtime_settings.get("light_baudrate", 19200),
+            intensity=self.runtime_settings.get("light_intensity", 50),
+            enabled=self.runtime_settings.get("light_enabled", False),
+            check_online=True,
+        )
 
     def save_runtime_settings(self):
         try:
@@ -522,6 +587,7 @@ class MainWindow(Toplevel):
         self.runtime_settings = self._load_runtime_settings()
         if self.camera is not None:
             self.camera.update_exposure(self.runtime_settings["exposure_us"])
+        self._sync_light_controller()
         return self.get_runtime_settings()
 
     def refresh_processing_parameters(self):
@@ -537,6 +603,8 @@ class MainWindow(Toplevel):
         if self.camera is not None:
             self.camera.close()
             self.camera = None
+        if self.light_controller is not None:
+            self.light_controller.close()
         master = self.master
         try:
             self.quit()

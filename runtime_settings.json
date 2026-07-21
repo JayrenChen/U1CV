@@ -26,5 +26,9 @@
     80,
     80
   ],
-  "auto_save_on_process": false
+  "auto_save_on_process": false,
+  "light_serial_port": "COM3",
+  "light_baudrate": 19200,
+  "light_intensity": 50,
+  "light_enabled": true
 }
