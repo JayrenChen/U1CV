@@ -15,7 +15,7 @@
   "calib_square_size_mm": 15.0,
   "fabric_type": "矩形布料",
   "offset_estimation_mode": "左上端点偏差估计",
-  "fabric_color_mode": "彩色布料",
+  "fabric_color_mode": "浅紫色布料",
   "hsv_lower": [
     260,
     10,
