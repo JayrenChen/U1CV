@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import platform
 import tkinter as tk
 from tkinter import Frame, StringVar
@@ -6,6 +7,7 @@ from tkinter import ttk, messagebox
 
 OUTPUT_PATH = Path(__file__).parent
 ASSETS_PATH = OUTPUT_PATH / Path("./assets")
+REF_COLOR_PATH = OUTPUT_PATH.parents[1] / "ref_color.json"
 
 
 def relative_to_assets(path: str) -> Path:
@@ -23,8 +25,100 @@ class Setting(Frame):
         self.controller = controller
         self.configure(bg="#FFFFFF")
         self.logo_page = None
+        self.ref_color_path = REF_COLOR_PATH
+        self.ref_colors = self._load_ref_colors()
 
         self._build_layout()
+
+    @staticmethod
+    def _default_ref_colors():
+        return {
+            "白色布料": {"hsv_lower": [0, 0, 70], "hsv_upper": [360, 30, 100]},
+            "黑色布料": {"hsv_lower": [0, 0, 0], "hsv_upper": [360, 100, 35]},
+            "浅紫色布料": {"hsv_lower": [260, 10, 60], "hsv_upper": [280, 80, 100]},
+            "紫色布料": {"hsv_lower": [250, 20, 30], "hsv_upper": [310, 100, 100]},
+        }
+
+    @staticmethod
+    def _normalize_fabric_color_name(value):
+        name = str(value or "").strip()
+        legacy_map = {
+            "黑白布料": "黑色布料",
+            "彩色布料": "浅紫色布料",
+        }
+        return legacy_map.get(name, name or "浅紫色布料")
+
+    def _sanitize_hsv_triplet(self, values, default_values):
+        try:
+            values = list(values)
+        except Exception:
+            values = list(default_values)
+        if len(values) != 3:
+            values = list(default_values)
+        return [
+            self._clamp_int(values[0], 0, 360),
+            self._clamp_int(values[1], 0, 100),
+            self._clamp_int(values[2], 0, 100),
+        ]
+
+    def _load_ref_colors(self):
+        colors = self._default_ref_colors()
+        if not self.ref_color_path.exists():
+            return colors
+        try:
+            with open(self.ref_color_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+        except Exception:
+            return colors
+        if not isinstance(loaded, dict):
+            return colors
+        for name, config in loaded.items():
+            color_name = str(name).strip()
+            if not color_name or not isinstance(config, dict):
+                continue
+            default_config = colors.get(color_name, colors["浅紫色布料"])
+            colors[color_name] = {
+                "hsv_lower": self._sanitize_hsv_triplet(config.get("hsv_lower", default_config["hsv_lower"]), default_config["hsv_lower"]),
+                "hsv_upper": self._sanitize_hsv_triplet(config.get("hsv_upper", default_config["hsv_upper"]), default_config["hsv_upper"]),
+            }
+        return colors
+
+    def _save_ref_colors(self):
+        with open(self.ref_color_path, "w", encoding="utf-8") as f:
+            json.dump(self.ref_colors, f, ensure_ascii=False, indent=2)
+
+    def _get_color_options(self):
+        return list(self.ref_colors.keys()) or ["浅紫色布料"]
+
+    def _set_hsv_vars(self, hsv_lower, hsv_upper):
+        hsv_lower = self._sanitize_hsv_triplet(hsv_lower, [260, 10, 60])
+        hsv_upper = self._sanitize_hsv_triplet(hsv_upper, [280, 80, 100])
+        self.setting_vars["HSV下界H"].set(str(hsv_lower[0]))
+        self.setting_vars["HSV下界S"].set(str(hsv_lower[1]))
+        self.setting_vars["HSV下界V"].set(str(hsv_lower[2]))
+        self.setting_vars["HSV上界H"].set(str(hsv_upper[0]))
+        self.setting_vars["HSV上界S"].set(str(hsv_upper[1]))
+        self.setting_vars["HSV上界V"].set(str(hsv_upper[2]))
+
+    def _apply_selected_color_preset(self):
+        color_name = self._normalize_fabric_color_name(self.setting_vars["布料颜色"].get())
+        preset = self.ref_colors.get(color_name)
+        if preset is None:
+            return
+        self._set_hsv_vars(preset["hsv_lower"], preset["hsv_upper"])
+
+    def _sync_color_preset(self, color_name, hsv_lower, hsv_upper):
+        color_name = self._normalize_fabric_color_name(color_name)
+        self.ref_colors[color_name] = {
+            "hsv_lower": self._sanitize_hsv_triplet(hsv_lower, [260, 10, 60]),
+            "hsv_upper": self._sanitize_hsv_triplet(hsv_upper, [280, 80, 100]),
+        }
+        self._save_ref_colors()
+
+    def _on_fabric_color_changed(self, _event=None):
+        self.ref_colors = self._load_ref_colors()
+        self._apply_selected_color_preset()
+        self._update_color_inputs_state()
 
     def _build_layout(self):
         container = ttk.Frame(self, style="Main.TFrame")
@@ -83,7 +177,7 @@ class Setting(Frame):
             "标定格子边长(mm)": StringVar(value="15.0"),
             "布料类型": StringVar(value="矩形布料"),
             "偏移估计模式": StringVar(value="中心点偏差估计"),
-            "识别模式": StringVar(value="黑白布料"),
+            "布料颜色": StringVar(value="浅紫色布料"),
             "HSV下界H": StringVar(value="0"),
             "HSV下界S": StringVar(value="0"),
             "HSV下界V": StringVar(value="0"),
@@ -157,7 +251,7 @@ class Setting(Frame):
         fabric_combo = ttk.Combobox(
             alg_card,
             textvariable=self.setting_vars["布料类型"],
-            values=["矩形布料", "弧形布料(预留)"],
+            values=["矩形布料", "U形布料"],
             state="readonly",
         )
         fabric_combo.grid(row=row_idx, column=1, sticky="ew", pady=5)
@@ -173,15 +267,15 @@ class Setting(Frame):
         offset_mode_combo.grid(row=row_idx, column=1, sticky="ew", pady=5)
 
         row_idx += 1
-        ttk.Label(alg_card, text="识别模式:", style="Key.TLabel").grid(row=row_idx, column=0, sticky="w", pady=5, padx=(0, 8))
-        mode_combo = ttk.Combobox(
+        ttk.Label(alg_card, text="布料颜色:", style="Key.TLabel").grid(row=row_idx, column=0, sticky="w", pady=5, padx=(0, 8))
+        self.fabric_color_combo = ttk.Combobox(
             alg_card,
-            textvariable=self.setting_vars["识别模式"],
-            values=["黑白布料", "彩色布料"],
+            textvariable=self.setting_vars["布料颜色"],
+            values=self._get_color_options(),
             state="readonly",
         )
-        mode_combo.grid(row=row_idx, column=1, sticky="ew", pady=5)
-        mode_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_color_inputs_state())
+        self.fabric_color_combo.grid(row=row_idx, column=1, sticky="ew", pady=5)
+        self.fabric_color_combo.bind("<<ComboboxSelected>>", self._on_fabric_color_changed)
 
         row_idx += 1
         ttk.Label(alg_card, text="HSV下界(H,S,V):", style="Key.TLabel").grid(row=row_idx, column=0, sticky="w", pady=5, padx=(0, 8))
@@ -246,8 +340,7 @@ class Setting(Frame):
             self.setting_vars["光源串口"].set(current_port)
 
     def _update_color_inputs_state(self):
-        is_color_mode = self.setting_vars["识别模式"].get() == "彩色布料"
-        state = "normal" if is_color_mode else "disabled"
+        state = "normal"
         for entry in getattr(self, "hsv_entries", []):
             entry.configure(state=state)
 
@@ -283,13 +376,16 @@ class Setting(Frame):
             "calib_square_size_mm": float(self.setting_vars["标定格子边长(mm)"].get()),
             "fabric_type": self.setting_vars["布料类型"].get(),
             "offset_estimation_mode": self.setting_vars["偏移估计模式"].get(),
-            "fabric_color_mode": self.setting_vars["识别模式"].get(),
+            "fabric_color_mode": self._normalize_fabric_color_name(self.setting_vars["布料颜色"].get()),
             "hsv_lower": hsv_lower,
             "hsv_upper": hsv_upper,
             "auto_save_on_process": self.setting_vars["自动保存"].get() == "是",
         }
 
     def _fill_vars(self, settings):
+        self.ref_colors = self._load_ref_colors()
+        if hasattr(self, "fabric_color_combo"):
+            self.fabric_color_combo.configure(values=self._get_color_options())
         self._refresh_light_ports()
         self.setting_vars["曝光时间(us)"].set(str(settings.get("exposure_us", 50000)))
         light_port = str(settings.get("light_serial_port", "")).strip()
@@ -314,29 +410,25 @@ class Setting(Frame):
         self.setting_vars["标定格子边长(mm)"].set(str(settings.get("calib_square_size_mm", 15.0)))
         self.setting_vars["布料类型"].set(str(settings.get("fabric_type", "矩形布料")))
         self.setting_vars["偏移估计模式"].set(str(settings.get("offset_estimation_mode", "中心点偏差估计")))
-        self.setting_vars["识别模式"].set(str(settings.get("fabric_color_mode", "黑白布料")))
+        color_name = self._normalize_fabric_color_name(settings.get("fabric_color_mode", "浅紫色布料"))
+        if color_name not in self.ref_colors:
+            hsv_lower_settings = settings.get("hsv_lower", [260, 10, 60])
+            hsv_upper_settings = settings.get("hsv_upper", [280, 80, 100])
+            self.ref_colors[color_name] = {
+                "hsv_lower": self._sanitize_hsv_triplet(hsv_lower_settings, [260, 10, 60]),
+                "hsv_upper": self._sanitize_hsv_triplet(hsv_upper_settings, [280, 80, 100]),
+            }
+            self._save_ref_colors()
+            if hasattr(self, "fabric_color_combo"):
+                self.fabric_color_combo.configure(values=self._get_color_options())
+        self.setting_vars["布料颜色"].set(color_name)
         self.setting_vars["自动保存"].set("是" if bool(settings.get("auto_save_on_process", False)) else "否")
 
-        hsv_lower = settings.get("hsv_lower", [0, 0, 0])
-        hsv_upper = settings.get("hsv_upper", [360, 100, 100])
-        try:
-            hsv_lower = list(hsv_lower)
-            hsv_upper = list(hsv_upper)
-        except Exception:
-            hsv_lower = [0, 0, 0]
-            hsv_upper = [360, 100, 100]
-
-        if len(hsv_lower) != 3:
-            hsv_lower = [0, 0, 0]
-        if len(hsv_upper) != 3:
-            hsv_upper = [360, 100, 100]
-
-        self.setting_vars["HSV下界H"].set(str(self._clamp_int(hsv_lower[0], 0, 360)))
-        self.setting_vars["HSV下界S"].set(str(self._clamp_int(hsv_lower[1], 0, 100)))
-        self.setting_vars["HSV下界V"].set(str(self._clamp_int(hsv_lower[2], 0, 100)))
-        self.setting_vars["HSV上界H"].set(str(self._clamp_int(hsv_upper[0], 0, 360)))
-        self.setting_vars["HSV上界S"].set(str(self._clamp_int(hsv_upper[1], 0, 100)))
-        self.setting_vars["HSV上界V"].set(str(self._clamp_int(hsv_upper[2], 0, 100)))
+        preset = self.ref_colors.get(color_name)
+        if preset is not None:
+            self._set_hsv_vars(preset["hsv_lower"], preset["hsv_upper"])
+        else:
+            self._set_hsv_vars(settings.get("hsv_lower", [260, 10, 60]), settings.get("hsv_upper", [280, 80, 100]))
         self._update_color_inputs_state()
 
     def _load_from_controller(self):
@@ -348,7 +440,9 @@ class Setting(Frame):
         if self.controller is None:
             return
         try:
-            self.controller.apply_runtime_settings(self._collect_settings())
+            settings = self._collect_settings()
+            self._sync_color_preset(settings["fabric_color_mode"], settings["hsv_lower"], settings["hsv_upper"])
+            self.controller.apply_runtime_settings(settings)
             messagebox.showinfo("参数设置", "参数已应用")
         except Exception as exc:
             messagebox.showerror("参数设置", f"参数应用失败: {exc}")
@@ -373,7 +467,9 @@ class Setting(Frame):
         if self.controller is None:
             return
         try:
-            self.controller.apply_runtime_settings(self._collect_settings())
+            settings = self._collect_settings()
+            self._sync_color_preset(settings["fabric_color_mode"], settings["hsv_lower"], settings["hsv_upper"])
+            self.controller.apply_runtime_settings(settings)
             self.controller.save_runtime_settings()
             messagebox.showinfo("参数设置", "配置已保存")
         except Exception as exc:
@@ -398,15 +494,16 @@ class Setting(Frame):
             "calib_square_size_mm": 15.0,
             "fabric_type": "矩形布料",
             "offset_estimation_mode": "中心点偏差估计",
-            "fabric_color_mode": "黑白布料",
-            "hsv_lower": [0, 0, 0],
-            "hsv_upper": [360, 100, 100],
+            "fabric_color_mode": "浅紫色布料",
+            "hsv_lower": [260, 10, 60],
+            "hsv_upper": [280, 80, 100],
             "auto_save_on_process": False,
             "light_serial_port": default_light_port,
             "light_baudrate": 19200,
             "light_intensity": 50,
             "light_enabled": False,
         }
+        self._sync_color_preset(defaults["fabric_color_mode"], defaults["hsv_lower"], defaults["hsv_upper"])
         self._fill_vars(defaults)
         if self.controller is not None:
             self.controller.apply_runtime_settings(defaults)

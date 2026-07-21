@@ -18,6 +18,7 @@ from gui.light_source_controller import LightSourceController
 OUTPUT_PATH = Path(__file__).parent
 ASSETS_PATH = OUTPUT_PATH / Path("./assets")
 SETTINGS_PATH = OUTPUT_PATH.parents[1] / "runtime_settings.json"
+REF_COLOR_PATH = OUTPUT_PATH.parents[1] / "gui" / "ref_color.json"
 LOGO_ICON_PATH = ASSETS_PATH / "icon_aitu.png"
 LOGO_PATH = ASSETS_PATH / "logo_aitu.png"
 ICON_HOME_PATH = ASSETS_PATH / "logo_home.png"
@@ -68,6 +69,8 @@ class MainWindow(Toplevel):
         self.light_controller = LightSourceController()
         self.default_light_serial_port = "/dev/ttyUSB0" if platform.system().lower() == "linux" else ""
         self.settings_path = SETTINGS_PATH
+        self.ref_color_path = REF_COLOR_PATH
+        self.ref_colors = self._load_ref_colors()
         self.default_settings = {
             "exposure_us": 50000.0,
             "bin_thresh": 60.0,
@@ -85,9 +88,9 @@ class MainWindow(Toplevel):
             "calib_square_size_mm": 15.0,
             "fabric_type": "矩形布料",
             "offset_estimation_mode": "中心点偏差估计",
-            "fabric_color_mode": "黑白布料",
-            "hsv_lower": [0, 0, 0],
-            "hsv_upper": [360, 100, 100],
+            "fabric_color_mode": "浅紫色布料",
+            "hsv_lower": [260, 10, 60],
+            "hsv_upper": [280, 80, 100],
             "auto_save_on_process": False,
             "light_serial_port": self.default_light_serial_port,
             "light_baudrate": 19200,
@@ -167,6 +170,60 @@ class MainWindow(Toplevel):
             return port
 
         return port
+
+    @staticmethod
+    def _default_ref_colors():
+        return {
+            "白色布料": {"hsv_lower": [0, 0, 70], "hsv_upper": [360, 30, 100]},
+            "黑色布料": {"hsv_lower": [0, 0, 0], "hsv_upper": [360, 100, 35]},
+            "浅紫色布料": {"hsv_lower": [260, 10, 60], "hsv_upper": [280, 80, 100]},
+            "紫色布料": {"hsv_lower": [250, 20, 30], "hsv_upper": [310, 100, 100]},
+        }
+
+    @staticmethod
+    def _sanitize_hsv_triplet(values, default_values):
+        try:
+            values = list(values)
+        except Exception:
+            values = list(default_values)
+        if len(values) != 3:
+            values = list(default_values)
+        return [
+            max(0, min(360, int(values[0]))),
+            max(0, min(100, int(values[1]))),
+            max(0, min(100, int(values[2]))),
+        ]
+
+    def _load_ref_colors(self):
+        colors = self._default_ref_colors()
+        if not self.ref_color_path.exists():
+            return colors
+        try:
+            with open(self.ref_color_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+        except Exception:
+            return colors
+        if not isinstance(loaded, dict):
+            return colors
+        for name, config in loaded.items():
+            color_name = str(name).strip()
+            if not color_name or not isinstance(config, dict):
+                continue
+            default_config = colors.get(color_name, colors["浅紫色布料"])
+            colors[color_name] = {
+                "hsv_lower": self._sanitize_hsv_triplet(config.get("hsv_lower", default_config["hsv_lower"]), default_config["hsv_lower"]),
+                "hsv_upper": self._sanitize_hsv_triplet(config.get("hsv_upper", default_config["hsv_upper"]), default_config["hsv_upper"]),
+            }
+        return colors
+
+    @staticmethod
+    def _normalize_fabric_color_mode(value):
+        mode = str(value or "").strip()
+        legacy_map = {
+            "黑白布料": "黑色布料",
+            "彩色布料": "浅紫色布料",
+        }
+        return legacy_map.get(mode, mode or "浅紫色布料")
 
     def _resolve_ui_font_family(self):
         available = list(tkfont.families(self))
@@ -514,6 +571,7 @@ class MainWindow(Toplevel):
             settings["light_serial_port"] = self.default_light_serial_port
 
         settings["light_serial_port"] = self._normalize_light_serial_port(settings.get("light_serial_port", ""))
+        settings["fabric_color_mode"] = self._normalize_fabric_color_mode(settings.get("fabric_color_mode", "浅紫色布料"))
         settings["runtime_platform"] = current_platform
         return settings
 
@@ -554,7 +612,7 @@ class MainWindow(Toplevel):
             merged["topview_y_max_mm"] = merged["topview_y_min_mm"] + 1.0
         merged["fabric_type"] = str(merged.get("fabric_type", "矩形布料"))
         merged["offset_estimation_mode"] = str(merged.get("offset_estimation_mode", "中心点偏差估计"))
-        merged["fabric_color_mode"] = str(merged.get("fabric_color_mode", "黑白布料"))
+        merged["fabric_color_mode"] = self._normalize_fabric_color_mode(merged.get("fabric_color_mode", "浅紫色布料"))
         merged["auto_save_on_process"] = bool(merged.get("auto_save_on_process", False))
         merged["light_serial_port"] = self._normalize_light_serial_port(merged.get("light_serial_port", ""))
         merged["runtime_platform"] = platform.system().lower()
@@ -562,30 +620,16 @@ class MainWindow(Toplevel):
         merged["light_intensity"] = _clamp_int(merged.get("light_intensity", 50), 0, 255)
         merged["light_enabled"] = bool(merged.get("light_enabled", False))
 
-        hsv_lower = merged.get("hsv_lower", [0, 0, 0])
-        hsv_upper = merged.get("hsv_upper", [360, 100, 100])
-        try:
-            hsv_lower = list(hsv_lower)
-            hsv_upper = list(hsv_upper)
-        except Exception:
-            hsv_lower = [0, 0, 0]
-            hsv_upper = [360, 100, 100]
-
-        if len(hsv_lower) != 3:
-            hsv_lower = [0, 0, 0]
-        if len(hsv_upper) != 3:
-            hsv_upper = [360, 100, 100]
-
-        merged["hsv_lower"] = [
-            _clamp_int(hsv_lower[0], 0, 360),
-            _clamp_int(hsv_lower[1], 0, 100),
-            _clamp_int(hsv_lower[2], 0, 100),
-        ]
-        merged["hsv_upper"] = [
-            _clamp_int(hsv_upper[0], 0, 360),
-            _clamp_int(hsv_upper[1], 0, 100),
-            _clamp_int(hsv_upper[2], 0, 100),
-        ]
+        self.ref_colors = self._load_ref_colors()
+        preset = self.ref_colors.get(merged["fabric_color_mode"])
+        if preset is None:
+            hsv_lower = merged.get("hsv_lower", [260, 10, 60])
+            hsv_upper = merged.get("hsv_upper", [280, 80, 100])
+            merged["hsv_lower"] = self._sanitize_hsv_triplet(hsv_lower, [260, 10, 60])
+            merged["hsv_upper"] = self._sanitize_hsv_triplet(hsv_upper, [280, 80, 100])
+        else:
+            merged["hsv_lower"] = list(preset["hsv_lower"])
+            merged["hsv_upper"] = list(preset["hsv_upper"])
         self.runtime_settings = merged
         if self.camera is not None:
             self.camera.update_exposure(self.runtime_settings["exposure_us"])

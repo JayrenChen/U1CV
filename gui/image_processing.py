@@ -9,6 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent
 PARAMS_PATH = BASE_DIR / "camera_params_all.npz"
 REF_OBJ_JSON_PATH = BASE_DIR / "ref_obj_mm.json"
 REF_OBJ_NPZ_PATH = BASE_DIR / "ref_obj_mm.npz"
+REF_COLOR_PATH = BASE_DIR / "ref_color.json"
 
 
 class ProcessingEngine:
@@ -20,8 +21,10 @@ class ProcessingEngine:
 
         self._params = None
         self._ref_obj = None
+        self._ref_colors = {}
         self._load_params()
         self._load_ref_obj()
+        self._load_ref_colors()
 
         self.bin_thresh = 60.0
         self.ppm = 5.0
@@ -31,9 +34,9 @@ class ProcessingEngine:
         self.anchor_hmm = 30.0
         self.fabric_type = "矩形布料"
         self.offset_estimation_mode = "中心点偏差估计"
-        self.fabric_color_mode = "黑白布料"
-        self.hsv_lower = np.array([0, 0, 0], dtype=np.float32)
-        self.hsv_upper = np.array([360, 100, 100], dtype=np.float32)
+        self.fabric_color_mode = "浅紫色布料"
+        self.hsv_lower = np.array([260, 10, 60], dtype=np.float32)
+        self.hsv_upper = np.array([280, 80, 100], dtype=np.float32)
 
         self.x_min_mm = -30.0
         self.x_max_mm = 200.0
@@ -79,9 +82,40 @@ class ProcessingEngine:
         except Exception:
             self._ref_obj = None
 
+    def _load_ref_colors(self):
+        self._ref_colors = {}
+        if not REF_COLOR_PATH.exists():
+            return
+        try:
+            loaded = json.loads(REF_COLOR_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        if not isinstance(loaded, dict):
+            return
+        for name, config in loaded.items():
+            if not isinstance(config, dict):
+                continue
+            color_name = str(name).strip()
+            if not color_name:
+                continue
+            self._ref_colors[color_name] = {
+                "hsv_lower": list(config.get("hsv_lower", [260, 10, 60])),
+                "hsv_upper": list(config.get("hsv_upper", [280, 80, 100])),
+            }
+
+    @staticmethod
+    def _normalize_fabric_color_mode(value):
+        mode = str(value or "").strip()
+        legacy_map = {
+            "黑白布料": "黑色布料",
+            "彩色布料": "浅紫色布料",
+        }
+        return legacy_map.get(mode, mode or "浅紫色布料")
+
     def refresh_params(self):
         self._load_params()
         self._load_ref_obj()
+        self._load_ref_colors()
         self.box_ref = self._load_reference_box()
         self._recompute_projection()
 
@@ -117,9 +151,13 @@ class ProcessingEngine:
         self.fabric_type = str(settings.get("fabric_type", self.fabric_type))
         self.offset_estimation_mode = str(settings.get("offset_estimation_mode", self.offset_estimation_mode))
 
-        self.fabric_color_mode = str(settings.get("fabric_color_mode", self.fabric_color_mode))
-        hsv_lower = settings.get("hsv_lower", self.hsv_lower.tolist())
-        hsv_upper = settings.get("hsv_upper", self.hsv_upper.tolist())
+        self._load_ref_colors()
+        self.fabric_color_mode = self._normalize_fabric_color_mode(settings.get("fabric_color_mode", self.fabric_color_mode))
+        preset = self._ref_colors.get(self.fabric_color_mode)
+        default_hsv_lower = preset["hsv_lower"] if preset is not None else self.hsv_lower.tolist()
+        default_hsv_upper = preset["hsv_upper"] if preset is not None else self.hsv_upper.tolist()
+        hsv_lower = settings.get("hsv_lower", default_hsv_lower)
+        hsv_upper = settings.get("hsv_upper", default_hsv_upper)
         try:
             hsv_lower = list(hsv_lower)
             hsv_upper = list(hsv_upper)
@@ -240,7 +278,7 @@ class ProcessingEngine:
         return [float(tl[0] + x), float(tl[1] + y), angle_deg], crop
 
     def _preprocess(self, img):
-        if self.fabric_color_mode == "彩色布料":
+        if self.fabric_color_mode in self._ref_colors:
             hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
             _hsv_lower = self.hsv_lower.copy()
             _hsv_upper = self.hsv_upper.copy()
@@ -354,6 +392,27 @@ class ProcessingEngine:
         # 1. 图像变换（去畸变+透视变换）
         im_undist = self._undistort(frame)
         im_proj = self._project(im_undist)
+
+        # X. 色彩空间均匀化
+        b, g, r = cv2.split(im_proj)
+        # 分别对每个通道做均衡化
+        bh = cv2.equalizeHist(b)
+        gh = cv2.equalizeHist(g)
+        rh = cv2.equalizeHist(r)
+        # clahe = cv2.createCLAHE(tileGridSize=(5,5))
+        # bh = clahe.apply(b)
+        # gh = clahe.apply(g)
+        # rh = clahe.apply(r)
+        result_color = cv2.merge((bh, gh, rh))
+        
+        # yuv = cv2.cvtColor(im_proj, cv2.COLOR_BGR2YUV_I420)
+        # height, width = im_proj.shape[:2]
+        # y_chn = yuv[0:height, 0:width]
+        # # 对Y分量进行直方图均衡
+        # eq_y_chn = cv2.equalizeHist(y_chn)
+        # delta = (np.float32(eq_y_chn) / np.float32(y_chn))
+        # result_color2 = np.uint8(np.clip(np.multiply(im_proj, delta[:, :, np.newaxis]), 0, 255))
+
         # 2. 寻找坐标系原点+绘制参考区域（TODO：寻找原点不鲁棒）
         self.ori, im_ori_crop = self._detect_ori(im_proj)
         box_ref_px = np.array([self._to_image_coord(float(p[0]), float(p[1])) for p in self.box_ref], dtype=np.float32)
@@ -407,7 +466,7 @@ class ProcessingEngine:
             "undistorted": im_undist,
             "projected": im_proj,
             "binary": cv2.cvtColor(im_pre, cv2.COLOR_GRAY2BGR),
-            "ori": im_ori_crop,
+            "ori": result_color, #im_ori_crop,
             "ref": im_ref,
             "preprocess": im_pre,
             "final": im_final,
