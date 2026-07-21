@@ -1,4 +1,5 @@
 from pathlib import Path
+import platform
 import tkinter as tk
 from tkinter import Frame, StringVar
 from tkinter import ttk, messagebox
@@ -114,7 +115,7 @@ class Setting(Frame):
         ttk.Label(cam_card, text="光源串口:", style="Key.TLabel").grid(row=1, column=0, sticky="w", pady=5, padx=(0, 8))
         self.light_port_combo = ttk.Combobox(cam_card, textvariable=self.setting_vars["光源串口"], state="readonly")
         self.light_port_combo.grid(row=1, column=1, sticky="ew", pady=5)
-        ttk.Button(cam_card, text="刷新", command=self._refresh_light_ports).grid(row=1, column=2, sticky="w", padx=(8, 0), pady=5)
+        ttk.Button(cam_card, text="刷新", command=self._refresh_light_ports, width=10).grid(row=1, column=2, sticky="w", padx=(8, 0), pady=5)
 
         ttk.Label(cam_card, text="光源波特率:", style="Key.TLabel").grid(row=2, column=0, sticky="w", pady=5, padx=(0, 8))
         self.light_baud_combo = ttk.Combobox(
@@ -124,18 +125,15 @@ class Setting(Frame):
             state="readonly",
         )
         self.light_baud_combo.grid(row=2, column=1, sticky="ew", pady=5)
-        ttk.Button(cam_card, text="在线检测", command=self._on_check_light_online).grid(row=2, column=2, sticky="w", padx=(8, 0), pady=5)
+        ttk.Button(cam_card, text="在线检测", command=self._on_check_light_online, width=10).grid(row=2, column=2, sticky="w", padx=(8, 0), pady=5)
 
-        light_control_row = ttk.Frame(cam_card, style="Main.TFrame")
-        light_control_row.grid(row=3, column=1, sticky="w", pady=5)
+        ttk.Label(cam_card, text="光源强度:", style="Key.TLabel").grid(row=3, column=0, sticky="w", padx=(0, 8))
+        self.light_intensity_spin = tk.Spinbox(cam_card, from_=0, to=255, textvariable=self.setting_vars["光源强度"])
+        self.light_intensity_spin.grid(row=3, column=1, sticky="ew", pady=5)
+        # ttk.Label(light_control_row, text="开关:", style="Key.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 6))
+        self.light_switch_combo = ttk.Combobox(cam_card, textvariable=self.setting_vars["光源开关"], values=["开", "关"], state="readonly", width=9) 
+        self.light_switch_combo.grid(row=3, column=2, sticky="w", padx=(8, 0), pady=5)
 
-        ttk.Label(light_control_row, text="强度:", style="Key.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6))
-        self.light_intensity_spin = tk.Spinbox(light_control_row, from_=0, to=255, textvariable=self.setting_vars["光源强度"], width=8)
-        self.light_intensity_spin.grid(row=0, column=1, sticky="w", padx=(0, 14))
-
-        ttk.Label(light_control_row, text="开关:", style="Key.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 6))
-        self.light_switch_combo = ttk.Combobox(light_control_row, textvariable=self.setting_vars["光源开关"], values=["开", "关"], state="readonly", width=8)
-        self.light_switch_combo.grid(row=0, column=3, sticky="w")
         cam_card.columnconfigure(1, weight=1)
         cam_card.columnconfigure(2, weight=0)
 
@@ -169,7 +167,7 @@ class Setting(Frame):
         offset_mode_combo = ttk.Combobox(
             alg_card,
             textvariable=self.setting_vars["偏移估计模式"],
-            values=["左上端点偏差估计", "中心点偏差估计", "右下端点偏差估计"],
+            values=["中心点偏差估计", "左上端点偏差估计", "右上端点偏差估计"],
             state="readonly",
         )
         offset_mode_combo.grid(row=row_idx, column=1, sticky="ew", pady=5)
@@ -382,6 +380,7 @@ class Setting(Frame):
             messagebox.showerror("参数设置", f"配置保存失败: {exc}")
 
     def _on_reset(self):
+        default_light_port = "/dev/ttyUSB0" if platform.system().lower() == "linux" else ""
         defaults = {
             "exposure_us": 50000,
             "bin_thresh": 60,
@@ -403,7 +402,7 @@ class Setting(Frame):
             "hsv_lower": [0, 0, 0],
             "hsv_upper": [360, 100, 100],
             "auto_save_on_process": False,
-            "light_serial_port": "",
+            "light_serial_port": default_light_port,
             "light_baudrate": 19200,
             "light_intensity": 50,
             "light_enabled": False,

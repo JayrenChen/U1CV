@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import platform
+
 
 def _import_serial():
     import serial
@@ -64,6 +67,32 @@ class LightSourceController:
         except Exception:
             print(message)
 
+    def _format_open_error(self, exc):
+        message = str(exc)
+        is_linux = platform.system().lower() == "linux"
+        is_permission_error = (
+            getattr(exc, "errno", None) == 13
+            or "Permission denied" in message
+            or "Errno 13" in message
+        )
+
+        if is_linux and is_permission_error:
+            hints = [
+                f"串口权限不足: {self.port}",
+                "请将当前用户加入 dialout 组并重新登录:",
+                f"  sudo usermod -aG dialout $USER",
+                "然后执行以下命令确认设备权限:",
+                f"  ls -l {self.port}",
+                "必要时临时授权(重启后失效):",
+                f"  sudo chmod 666 {self.port}",
+            ]
+            return "\n".join(hints)
+
+        if is_linux and os.path.exists(self.port) and not os.access(self.port, os.R_OK | os.W_OK):
+            return f"串口存在但当前用户无读写权限: {self.port}"
+
+        return message
+
     def close(self):
         if self._serial is None:
             return
@@ -92,15 +121,18 @@ class LightSourceController:
             self.close()
 
         serial, _ = _import_serial()
-        self._serial = serial.Serial(
-            port=self.port,
-            baudrate=self.baudrate,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
-            timeout=0.25,
-            write_timeout=0.5,
-        )
+        try:
+            self._serial = serial.Serial(
+                port=self.port,
+                baudrate=self.baudrate,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                timeout=0.25,
+                write_timeout=0.5,
+            )
+        except Exception as exc:
+            raise RuntimeError(self._format_open_error(exc)) from exc
         self._log(f"[光源控制] 串口已打开: {self.port}, baudrate={self.baudrate}")
         return self._serial
 
