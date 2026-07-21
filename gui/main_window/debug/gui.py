@@ -10,7 +10,11 @@ from tkinter import ttk
 
 PARAMS_PATH = Path(__file__).parents[2] / "camera_params_all.npz"
 REF_OBJ_PATH = Path(__file__).parents[2] / "ref_obj_mm.npz"
+ILLUMINATION_GAIN_PATH = Path(__file__).parents[2] / "illumination_gain.npz"
 RESULTS_DIR = Path(__file__).parents[3] / "results"
+FLAT_FIELD_FRAME_COUNT = 20
+FLAT_FIELD_GAIN_MIN = 0.6
+FLAT_FIELD_GAIN_MAX = 1.8
 
 
 def debug_page(parent, controller=None):
@@ -104,7 +108,7 @@ class DebugPage(Frame):
 
         ttk.Label(
             tips_card,
-            text="先点击图像获取，再点击校准坐标系",
+            text="坐标系校准后，放置均匀白/灰参考面进行亮度平场校准",
             style="Value.TLabel",
         ).grid(row=0, column=0, sticky="w", pady=(0, 8))
 
@@ -114,10 +118,13 @@ class DebugPage(Frame):
         ttk.Button(tips_card, text="校准坐标系", style="Primary.TButton", command=self._on_calibrate_coords).grid(
             row=2, column=0, sticky="ew", pady=6
         )
-        ttk.Button(tips_card, text="显示定位区域", style="Primary.TButton", command=self._on_show_reference_region).grid(
+        ttk.Button(tips_card, text="亮度平场校准", style="Primary.TButton", command=self._on_calibrate_illumination).grid(
             row=3, column=0, sticky="ew", pady=6
         )
-        ttk.Button(tips_card, text="清空显示", command=self._on_clear).grid(row=4, column=0, sticky="ew", pady=6)
+        ttk.Button(tips_card, text="显示定位区域", style="Primary.TButton", command=self._on_show_reference_region).grid(
+            row=4, column=0, sticky="ew", pady=6
+        )
+        ttk.Button(tips_card, text="清空显示", command=self._on_clear).grid(row=5, column=0, sticky="ew", pady=6)
 
         log_card = ttk.LabelFrame(parent, text="事件日志", style="Panel.TLabelframe", padding=10)
         log_card.grid(row=3, column=0, sticky="nsew", pady=(8, 6))
@@ -376,6 +383,84 @@ class DebugPage(Frame):
                 self._append_log("主页处理引擎参数已刷新")
         except Exception as exc:
             self._append_log(f"坐标系校准失败: {exc}")
+
+    def _on_calibrate_illumination(self):
+        if self.controller is None:
+            self._append_log("控制器不可用")
+            return
+
+        try:
+            params = self._load_params_dict()
+            mtx = params.get("mtx")
+            dist = params.get("dist")
+            if mtx is None or dist is None:
+                raise RuntimeError("缺少相机标定参数 mtx/dist，无法矫正")
+            if params.get("H_img2world") is None:
+                raise RuntimeError("缺少透视参数 H_img2world，请先校准坐标系")
+
+            settings = self._get_runtime_settings()
+            reference_frames = []
+            last_projected = None
+            self._append_log(f"开始采集 {FLAT_FIELD_FRAME_COUNT} 帧平场参考图，请保持白/灰参考面静止")
+
+            for _ in range(FLAT_FIELD_FRAME_COUNT):
+                frame = self.controller.capture_single_image()
+                height, width = frame.shape[:2]
+                new_mtx, _ = cv2.getOptimalNewCameraMatrix(mtx, dist, (width, height), 1, (width, height))
+                undistorted = cv2.undistort(frame, mtx, dist, None, new_mtx)
+                projected, _ = self._project_with_h(undistorted, settings, params)
+                if last_projected is not None and projected.shape != last_projected.shape:
+                    raise RuntimeError("采集期间俯视图尺寸发生变化")
+                gray = cv2.cvtColor(projected, cv2.COLOR_BGR2GRAY)
+                reference_frames.append(gray)
+                last_projected = projected
+
+            reference = np.median(np.stack(reference_frames, axis=0), axis=0).astype(np.float32)
+            valid_mask = (reference > 8.0).astype(np.float32)
+            if np.count_nonzero(valid_mask) < reference.size * 0.25:
+                raise RuntimeError("有效参考区域过小，请确认白/灰参考面和俯视范围")
+
+            sigma = max(min(reference.shape) / 10.0, 15.0)
+            weighted_brightness = cv2.GaussianBlur(reference * valid_mask, (0, 0), sigmaX=sigma, sigmaY=sigma)
+            blurred_mask = cv2.GaussianBlur(valid_mask, (0, 0), sigmaX=sigma, sigmaY=sigma)
+            illumination = weighted_brightness / np.maximum(blurred_mask, 1e-6)
+            target_brightness = float(np.median(reference[valid_mask > 0]))
+            gain = target_brightness / np.maximum(illumination, 1.0)
+            gain = np.clip(gain, FLAT_FIELD_GAIN_MIN, FLAT_FIELD_GAIN_MAX).astype(np.float32)
+            gain[valid_mask == 0] = 1.0
+
+            np.savez(
+                str(ILLUMINATION_GAIN_PATH),
+                gain=gain,
+                reference=reference,
+                target_brightness=np.array(target_brightness, dtype=np.float32),
+                frame_count=np.array(FLAT_FIELD_FRAME_COUNT, dtype=np.int32),
+                gain_min=np.array(FLAT_FIELD_GAIN_MIN, dtype=np.float32),
+                gain_max=np.array(FLAT_FIELD_GAIN_MAX, dtype=np.float32),
+            )
+
+            corrected = np.clip(last_projected.astype(np.float32) * gain[:, :, np.newaxis], 0, 255).astype(np.uint8)
+            gain_preview = cv2.normalize(gain, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+            RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+            now = datetime.now().strftime("%Y%m%d_%H%M%S")
+            calib_dir = RESULTS_DIR / f"illumination_{now}"
+            calib_dir.mkdir(parents=True, exist_ok=True)
+            self._save_image(calib_dir / "projected_reference.png", last_projected)
+            self._save_image(calib_dir / "gain_map.png", gain_preview)
+            self._save_image(calib_dir / "corrected_preview.png", corrected)
+
+            self._update_panel_image("矫正图像", last_projected, "平场校准原图")
+            self._update_panel_image("俯视图", corrected, "平场校准预览")
+            self._append_log(
+                f"亮度平场校准成功，目标亮度 {target_brightness:.1f}，增益范围 {gain.min():.2f}-{gain.max():.2f}"
+            )
+            self._append_log(f"平场增益已保存: {ILLUMINATION_GAIN_PATH.name}；追溯文件: {calib_dir.name}")
+
+            self.controller.refresh_processing_parameters()
+            self._append_log("主页处理引擎已加载新的平场增益")
+        except Exception as exc:
+            self._append_log(f"亮度平场校准失败: {exc}")
 
     def _on_show_reference_region(self):
         if self.controller is None:

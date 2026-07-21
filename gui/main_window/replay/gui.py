@@ -72,7 +72,7 @@ class Replay(Frame):
         panel_titles = [
             "相机原图",
             "检测结果",
-            "定位区域",
+            "图像校准",
             "二值图像",
         ]
 
@@ -104,7 +104,7 @@ class Replay(Frame):
         self.image_panel_map = {
             "相机原图": self.image_canvases[0],
             "检测结果": self.image_canvases[1],
-            "定位区域": self.image_canvases[2],
+            "图像校准": self.image_canvases[2],
             "二值图像": self.image_canvases[3],
         }
 
@@ -327,7 +327,7 @@ class Replay(Frame):
         image_paths = {
             "相机原图": image_root / "raw.png",
             "检测结果": image_root / "final.png",
-            "定位区域": image_root / "ori.png",
+            "图像校准": image_root / "projected.png",
             "二值图像": image_root / "preprocess.png",
         }
 

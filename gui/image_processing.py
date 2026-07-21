@@ -10,6 +10,7 @@ PARAMS_PATH = BASE_DIR / "camera_params_all.npz"
 REF_OBJ_JSON_PATH = BASE_DIR / "ref_obj_mm.json"
 REF_OBJ_NPZ_PATH = BASE_DIR / "ref_obj_mm.npz"
 REF_COLOR_PATH = BASE_DIR / "ref_color.json"
+ILLUMINATION_GAIN_PATH = BASE_DIR / "illumination_gain.npz"
 
 
 class ProcessingEngine:
@@ -22,9 +23,11 @@ class ProcessingEngine:
         self._params = None
         self._ref_obj = None
         self._ref_colors = {}
+        self._illumination_gain = None
         self._load_params()
         self._load_ref_obj()
         self._load_ref_colors()
+        self._load_illumination_gain()
 
         self.bin_thresh = 60.0
         self.ppm = 5.0
@@ -103,6 +106,18 @@ class ProcessingEngine:
                 "hsv_upper": list(config.get("hsv_upper", [280, 80, 100])),
             }
 
+    def _load_illumination_gain(self):
+        self._illumination_gain = None
+        if not ILLUMINATION_GAIN_PATH.exists():
+            return
+        try:
+            data = np.load(str(ILLUMINATION_GAIN_PATH), allow_pickle=False)
+            gain = np.asarray(data["gain"], dtype=np.float32)
+            if gain.ndim == 2 and gain.size > 0 and np.all(np.isfinite(gain)):
+                self._illumination_gain = gain
+        except Exception:
+            self._illumination_gain = None
+
     @staticmethod
     def _normalize_fabric_color_mode(value):
         mode = str(value or "").strip()
@@ -116,6 +131,7 @@ class ProcessingEngine:
         self._load_params()
         self._load_ref_obj()
         self._load_ref_colors()
+        self._load_illumination_gain()
         self.box_ref = self._load_reference_box()
         self._recompute_projection()
 
@@ -216,6 +232,13 @@ class ProcessingEngine:
         if self.M_top is None:
             return img
         return cv2.warpPerspective(img, self.M_top, (self.out_w, self.out_h), flags=cv2.INTER_LINEAR)
+
+    def _apply_illumination_correction(self, img: np.ndarray) -> np.ndarray:
+        gain = self._illumination_gain
+        if gain is None or gain.shape != img.shape[:2]:
+            return img
+        corrected = img.astype(np.float32) * gain[:, :, np.newaxis]
+        return np.clip(corrected, 0, 255).astype(np.uint8)
 
     def draw_ori(self, img):
         img_ = img.copy()
@@ -392,33 +415,13 @@ class ProcessingEngine:
         # 1. 图像变换（去畸变+透视变换）
         im_undist = self._undistort(frame)
         im_proj = self._project(im_undist)
-
-        # X. 色彩空间均匀化
-        b, g, r = cv2.split(im_proj)
-        # 分别对每个通道做均衡化
-        bh = cv2.equalizeHist(b)
-        gh = cv2.equalizeHist(g)
-        rh = cv2.equalizeHist(r)
-        # clahe = cv2.createCLAHE(tileGridSize=(5,5))
-        # bh = clahe.apply(b)
-        # gh = clahe.apply(g)
-        # rh = clahe.apply(r)
-        result_color = cv2.merge((bh, gh, rh))
-        
-        # yuv = cv2.cvtColor(im_proj, cv2.COLOR_BGR2YUV_I420)
-        # height, width = im_proj.shape[:2]
-        # y_chn = yuv[0:height, 0:width]
-        # # 对Y分量进行直方图均衡
-        # eq_y_chn = cv2.equalizeHist(y_chn)
-        # delta = (np.float32(eq_y_chn) / np.float32(y_chn))
-        # result_color2 = np.uint8(np.clip(np.multiply(im_proj, delta[:, :, np.newaxis]), 0, 255))
-
+        im_ill_corr = self._apply_illumination_correction(im_proj)
         # 2. 寻找坐标系原点+绘制参考区域（TODO：寻找原点不鲁棒）
-        self.ori, im_ori_crop = self._detect_ori(im_proj)
+        self.ori, im_ori_crop = self._detect_ori(im_ill_corr)
         box_ref_px = np.array([self._to_image_coord(float(p[0]), float(p[1])) for p in self.box_ref], dtype=np.float32)
-        im_ref = self.draw_ref_box(self.draw_ori(im_proj), box_ref_px)
+        im_ref = self.draw_ref_box(self.draw_ori(im_ill_corr), box_ref_px)
         # 3. 图像预处理(灰度+滤波+二值化+最大联通+闭运算)
-        im_pre = self._preprocess(im_proj)
+        im_pre = self._preprocess(im_ill_corr)
         # 4. 检测矩形目标
         box_detected = self._detect_box(im_pre)
         im_final = self.draw_detected_object(im_ref, box_detected)
@@ -466,7 +469,7 @@ class ProcessingEngine:
             "undistorted": im_undist,
             "projected": im_proj,
             "binary": cv2.cvtColor(im_pre, cv2.COLOR_GRAY2BGR),
-            "ori": result_color, #im_ori_crop,
+            "ori": im_ill_corr,
             "ref": im_ref,
             "preprocess": im_pre,
             "final": im_final,
