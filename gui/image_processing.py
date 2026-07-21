@@ -69,6 +69,12 @@ class ProcessingEngine:
         except Exception:
             self._ref_obj = None
 
+    def refresh_params(self):
+        self._load_params()
+        self._load_ref_obj()
+        self.box_ref = self._load_reference_box()
+        self._recompute_projection()
+
     def _load_reference_box(self):
         if self._ref_obj is not None and "box_mm" in self._ref_obj.files:
             pts = np.asarray(self._ref_obj["box_mm"], dtype=np.float32).reshape(-1, 2)
@@ -82,6 +88,14 @@ class ProcessingEngine:
 
         self.bin_thresh = float(settings.get("bin_thresh", self.bin_thresh))
         self.ppm = float(settings.get("ppm", self.ppm))
+        self.x_min_mm = float(settings.get("topview_x_min_mm", self.x_min_mm))
+        self.x_max_mm = float(settings.get("topview_x_max_mm", self.x_max_mm))
+        self.y_min_mm = float(settings.get("topview_y_min_mm", self.y_min_mm))
+        self.y_max_mm = float(settings.get("topview_y_max_mm", self.y_max_mm))
+        if self.x_max_mm <= self.x_min_mm:
+            self.x_max_mm = self.x_min_mm + 1.0
+        if self.y_max_mm <= self.y_min_mm:
+            self.y_max_mm = self.y_min_mm + 1.0
         self.anchor_xmm = float(settings.get("anchor_xmm", self.anchor_xmm))
         self.anchor_ymm = float(settings.get("anchor_ymm", self.anchor_ymm))
         self.anchor_wmm = float(settings.get("anchor_wmm", self.anchor_wmm))
@@ -188,7 +202,7 @@ class ProcessingEngine:
         x2 = min(x + w, img.shape[1])
         y2 = min(y + h, img.shape[0])
         if x >= x2 or y >= y2:
-            return [0.0, 0.0, 0.0]
+            return [0.0, 0.0, 0.0], img.copy()
 
         crop = img[y:y2, x:x2]
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop.copy()
@@ -196,7 +210,7 @@ class ProcessingEngine:
         _, bw = cv2.threshold(blur, 30, 255, cv2.THRESH_BINARY_INV)
         contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
-            return [0.0, 0.0, 0.0]
+            return [0.0, 0.0, 0.0], crop
 
         cnt = max(contours, key=cv2.contourArea)
         rect = cv2.minAreaRect(cnt)

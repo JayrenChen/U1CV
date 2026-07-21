@@ -9,6 +9,7 @@ from tkinter import Toplevel, Frame, Canvas, Button
 from tkinter import ttk
 
 from gui.main_window.dashboard.gui import Dashboard
+from gui.main_window.debug.gui import DebugPage
 from gui.main_window.replay.gui import Replay
 from gui.main_window.setting.main import Setting
 from gui.camera_interface import CameraInterface
@@ -68,10 +69,17 @@ class MainWindow(Toplevel):
             "exposure_us": 50000.0,
             "bin_thresh": 60.0,
             "ppm": 5.0,
+            "topview_x_min_mm": -30.0,
+            "topview_x_max_mm": 200.0,
+            "topview_y_min_mm": -60.0,
+            "topview_y_max_mm": 280.0,
             "anchor_xmm": 10.0,
             "anchor_ymm": 10.0,
             "anchor_wmm": 30.0,
             "anchor_hmm": 30.0,
+            "calib_pattern_cols": 11,
+            "calib_pattern_rows": 8,
+            "calib_square_size_mm": 15.0,
             "fabric_type": "矩形布料",
             "offset_estimation_mode": "中心点偏差估计",
             "fabric_color_mode": "黑白布料",
@@ -362,6 +370,22 @@ class MainWindow(Toplevel):
         )
         self.replay_btn.place(x=20, y=182, width=150, height=46)
 
+        self.debug_btn = Button(
+            sidebar,
+            text="  调试",
+            image=self.logo_replay,
+            compound="left",
+            fg="white",
+            bg=self.palette["bg_sidebar"],
+            bd=0,
+            relief="flat",
+            font=(self.ui_font_family, 14, "bold"),
+            activebackground=self.palette["bg_sidebar_active"],
+            activeforeground="white",
+            command=lambda: self.handle_btn_press("debug", 234),
+        )
+        self.debug_btn.place(x=20, y=234, width=150, height=46)
+
         self.setting_btn = Button(
             sidebar,
             text="  设置",
@@ -374,13 +398,14 @@ class MainWindow(Toplevel):
             font=(self.ui_font_family, 14, "bold"),
             activebackground=self.palette["bg_sidebar_active"],
             activeforeground="white",
-            command=lambda: self.handle_btn_press("set", 234),
+            command=lambda: self.handle_btn_press("set", 286),
         )
-        self.setting_btn.place(x=20, y=234, width=150, height=46)
+        self.setting_btn.place(x=20, y=286, width=150, height=46)
 
         self.windows = {
             "dash": Dashboard(self.content_area, controller=self),
             "replay": Replay(self.content_area, controller=self),
+            "debug": DebugPage(self.content_area, controller=self),
             "set": Setting(self.content_area, controller=self),
         }
 
@@ -425,10 +450,34 @@ class MainWindow(Toplevel):
         def _clamp_int(value, low, high):
             return max(low, min(high, int(value)))
 
+        def _max_float(value, low):
+            return max(float(low), float(value))
+
         merged = dict(self.runtime_settings)
         merged.update(new_settings)
-        for k in ["exposure_us", "bin_thresh", "ppm", "anchor_xmm", "anchor_ymm", "anchor_wmm", "anchor_hmm"]:
+        for k in [
+            "exposure_us",
+            "bin_thresh",
+            "ppm",
+            "topview_x_min_mm",
+            "topview_x_max_mm",
+            "topview_y_min_mm",
+            "topview_y_max_mm",
+            "anchor_xmm",
+            "anchor_ymm",
+            "anchor_wmm",
+            "anchor_hmm",
+            "calib_square_size_mm",
+        ]:
             merged[k] = float(merged[k])
+        merged["calib_pattern_cols"] = _clamp_int(merged.get("calib_pattern_cols", 11), 3, 99)
+        merged["calib_pattern_rows"] = _clamp_int(merged.get("calib_pattern_rows", 8), 3, 99)
+        merged["calib_square_size_mm"] = _max_float(merged.get("calib_square_size_mm", 15.0), 0.1)
+
+        if merged["topview_x_max_mm"] <= merged["topview_x_min_mm"]:
+            merged["topview_x_max_mm"] = merged["topview_x_min_mm"] + 1.0
+        if merged["topview_y_max_mm"] <= merged["topview_y_min_mm"]:
+            merged["topview_y_max_mm"] = merged["topview_y_min_mm"] + 1.0
         merged["fabric_type"] = str(merged.get("fabric_type", "矩形布料"))
         merged["offset_estimation_mode"] = str(merged.get("offset_estimation_mode", "中心点偏差估计"))
         merged["fabric_color_mode"] = str(merged.get("fabric_color_mode", "黑白布料"))
@@ -474,6 +523,15 @@ class MainWindow(Toplevel):
         if self.camera is not None:
             self.camera.update_exposure(self.runtime_settings["exposure_us"])
         return self.get_runtime_settings()
+
+    def refresh_processing_parameters(self):
+        dash = self.windows.get("dash")
+        if dash is None:
+            return
+        try:
+            dash.processor.refresh_params()
+        except Exception:
+            pass
 
     def _on_window_close(self):
         if self.camera is not None:

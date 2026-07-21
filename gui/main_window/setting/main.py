@@ -65,10 +65,17 @@ class Setting(Frame):
             "曝光时间(us)": StringVar(value="50000"),
             "二值阈值": StringVar(value="60"),
             "PPM": StringVar(value="5.0"),
+            "俯视X最小(mm)": StringVar(value="-30.0"),
+            "俯视X最大(mm)": StringVar(value="200.0"),
+            "俯视Y最小(mm)": StringVar(value="-60.0"),
+            "俯视Y最大(mm)": StringVar(value="280.0"),
             "定位X(mm)": StringVar(value="10"),
             "定位Y(mm)": StringVar(value="10"),
             "定位W(mm)": StringVar(value="30"),
             "定位H(mm)": StringVar(value="30"),
+            "标定棋盘列角点": StringVar(value="11"),
+            "标定棋盘行角点": StringVar(value="8"),
+            "标定格子边长(mm)": StringVar(value="15.0"),
             "布料类型": StringVar(value="矩形布料"),
             "偏移估计模式": StringVar(value="中心点偏差估计"),
             "识别模式": StringVar(value="黑白布料"),
@@ -82,7 +89,21 @@ class Setting(Frame):
         }
 
         cam_fields = ["曝光时间(us)"]
-        alg_fields = ["二值阈值", "PPM", "定位X(mm)", "定位Y(mm)", "定位W(mm)", "定位H(mm)"]
+        alg_fields = [
+            "二值阈值",
+            "PPM",
+            "俯视X最小(mm)",
+            "俯视X最大(mm)",
+            "俯视Y最小(mm)",
+            "俯视Y最大(mm)",
+            "定位X(mm)",
+            "定位Y(mm)",
+            "定位W(mm)",
+            "定位H(mm)",
+            "标定棋盘列角点",
+            "标定棋盘行角点",
+            "标定格子边长(mm)",
+        ]
 
         for i, key in enumerate(cam_fields):
             ttk.Label(cam_card, text=key + ":", style="Key.TLabel").grid(row=i, column=0, sticky="w", pady=5, padx=(0, 8))
@@ -191,10 +212,17 @@ class Setting(Frame):
             "exposure_us": float(self.setting_vars["曝光时间(us)"].get()),
             "bin_thresh": float(self.setting_vars["二值阈值"].get()),
             "ppm": float(self.setting_vars["PPM"].get()),
+            "topview_x_min_mm": float(self.setting_vars["俯视X最小(mm)"].get()),
+            "topview_x_max_mm": float(self.setting_vars["俯视X最大(mm)"].get()),
+            "topview_y_min_mm": float(self.setting_vars["俯视Y最小(mm)"].get()),
+            "topview_y_max_mm": float(self.setting_vars["俯视Y最大(mm)"].get()),
             "anchor_xmm": float(self.setting_vars["定位X(mm)"].get()),
             "anchor_ymm": float(self.setting_vars["定位Y(mm)"].get()),
             "anchor_wmm": float(self.setting_vars["定位W(mm)"].get()),
             "anchor_hmm": float(self.setting_vars["定位H(mm)"].get()),
+            "calib_pattern_cols": int(float(self.setting_vars["标定棋盘列角点"].get())),
+            "calib_pattern_rows": int(float(self.setting_vars["标定棋盘行角点"].get())),
+            "calib_square_size_mm": float(self.setting_vars["标定格子边长(mm)"].get()),
             "fabric_type": self.setting_vars["布料类型"].get(),
             "offset_estimation_mode": self.setting_vars["偏移估计模式"].get(),
             "fabric_color_mode": self.setting_vars["识别模式"].get(),
@@ -207,10 +235,17 @@ class Setting(Frame):
         self.setting_vars["曝光时间(us)"].set(str(settings.get("exposure_us", 50000)))
         self.setting_vars["二值阈值"].set(str(settings.get("bin_thresh", 60)))
         self.setting_vars["PPM"].set(str(settings.get("ppm", 5.0)))
+        self.setting_vars["俯视X最小(mm)"].set(str(settings.get("topview_x_min_mm", -30.0)))
+        self.setting_vars["俯视X最大(mm)"].set(str(settings.get("topview_x_max_mm", 200.0)))
+        self.setting_vars["俯视Y最小(mm)"].set(str(settings.get("topview_y_min_mm", -60.0)))
+        self.setting_vars["俯视Y最大(mm)"].set(str(settings.get("topview_y_max_mm", 280.0)))
         self.setting_vars["定位X(mm)"].set(str(settings.get("anchor_xmm", 10)))
         self.setting_vars["定位Y(mm)"].set(str(settings.get("anchor_ymm", 10)))
         self.setting_vars["定位W(mm)"].set(str(settings.get("anchor_wmm", 30)))
         self.setting_vars["定位H(mm)"].set(str(settings.get("anchor_hmm", 30)))
+        self.setting_vars["标定棋盘列角点"].set(str(settings.get("calib_pattern_cols", 11)))
+        self.setting_vars["标定棋盘行角点"].set(str(settings.get("calib_pattern_rows", 8)))
+        self.setting_vars["标定格子边长(mm)"].set(str(settings.get("calib_square_size_mm", 15.0)))
         self.setting_vars["布料类型"].set(str(settings.get("fabric_type", "矩形布料")))
         self.setting_vars["偏移估计模式"].set(str(settings.get("offset_estimation_mode", "中心点偏差估计")))
         self.setting_vars["识别模式"].set(str(settings.get("fabric_color_mode", "黑白布料")))
@@ -274,10 +309,17 @@ class Setting(Frame):
             "exposure_us": 50000,
             "bin_thresh": 60,
             "ppm": 5.0,
+            "topview_x_min_mm": -30.0,
+            "topview_x_max_mm": 200.0,
+            "topview_y_min_mm": -60.0,
+            "topview_y_max_mm": 280.0,
             "anchor_xmm": 10,
             "anchor_ymm": 10,
             "anchor_wmm": 30,
             "anchor_hmm": 30,
+            "calib_pattern_cols": 11,
+            "calib_pattern_rows": 8,
+            "calib_square_size_mm": 15.0,
             "fabric_type": "矩形布料",
             "offset_estimation_mode": "中心点偏差估计",
             "fabric_color_mode": "黑白布料",
