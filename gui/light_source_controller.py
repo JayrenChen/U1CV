@@ -26,10 +26,16 @@ class LightSourceController:
         self.baudrate = int(baudrate)
         self.address = int(address)
         self._serial = None
-        self._logger = logger or print
+        self._logger = logger or self._noop_logger
 
     def set_logger(self, logger):
-        self._logger = logger or print
+        self._logger = logger or self._noop_logger
+
+    @staticmethod
+    def _noop_logger(_message):
+        """Default logger: discards messages instead of printing to stdout.
+        Light source control logs should only be shown in the GUI."""
+        pass
 
     @staticmethod
     def list_serial_ports():
@@ -65,7 +71,7 @@ class LightSourceController:
         try:
             self._logger(message)
         except Exception:
-            print(message)
+            pass
 
     def _format_open_error(self, exc):
         message = str(exc)

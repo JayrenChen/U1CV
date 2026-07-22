@@ -5,11 +5,12 @@ import tkinter as tk
 from tkinter import Frame, StringVar
 from tkinter import ttk, messagebox
 
+from gui.image_processing import FABRIC_TYPE_OPTIONS
+
 OUTPUT_PATH = Path(__file__).parent
 ASSETS_PATH = OUTPUT_PATH / Path("./assets")
 REF_COLOR_PATH = OUTPUT_PATH.parents[1] / "ref_color.json"
 
-FABRIC_TYPE_OPTIONS = ["矩形布料10050", "U形布料10050", "衬衫布料10050"]
 OFFSET_MODE_OPTIONS = [
     "中心点偏差估计",
     "左上端点偏差估计",
@@ -46,6 +47,14 @@ class Setting(Frame):
             "黑色布料": {"hsv_lower": [0, 0, 0], "hsv_upper": [360, 100, 35]},
             "浅紫色布料": {"hsv_lower": [260, 10, 60], "hsv_upper": [280, 80, 100]},
             "紫色布料": {"hsv_lower": [250, 20, 30], "hsv_upper": [310, 100, 100]},
+            "红色布料": {"hsv_lower": [0, 40, 30], "hsv_upper": [15, 100, 100]},
+            "橙色布料": {"hsv_lower": [15, 40, 40], "hsv_upper": [40, 100, 100]},
+            "黄色布料": {"hsv_lower": [40, 35, 40], "hsv_upper": [70, 100, 100]},
+            "绿色布料": {"hsv_lower": [70, 30, 20], "hsv_upper": [160, 100, 100]},
+            "浅蓝色布料": {"hsv_lower": [160, 15, 55], "hsv_upper": [200, 55, 100]},
+            "蓝色布料": {"hsv_lower": [200, 30, 20], "hsv_upper": [250, 100, 100]},
+            "粉色布料": {"hsv_lower": [300, 15, 60], "hsv_upper": [345, 55, 100]},
+            "灰色布料": {"hsv_lower": [0, 0, 35], "hsv_upper": [360, 15, 70]},
         }
 
     @staticmethod
@@ -494,9 +503,8 @@ class Setting(Frame):
         try:
             settings = self._collect_settings()
             self._sync_color_preset(settings["fabric_color_mode"], settings["hsv_lower"], settings["hsv_upper"])
-            self.controller.apply_runtime_settings(settings)
-            self.controller.save_runtime_settings()
-            messagebox.showinfo("参数设置", "配置已保存")
+            self.controller.save_runtime_settings_only(settings)
+            messagebox.showinfo("参数设置", "配置已保存（尚未应用，点击“应用参数”后生效）")
         except Exception as exc:
             messagebox.showerror("参数设置", f"配置保存失败: {exc}")
 

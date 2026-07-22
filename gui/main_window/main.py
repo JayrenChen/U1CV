@@ -13,6 +13,7 @@ from gui.main_window.debug.gui import DebugPage
 from gui.main_window.replay.gui import Replay
 from gui.main_window.setting.main import Setting
 from gui.camera_interface import CameraInterface
+from gui.image_processing import FABRIC_TYPE_OPTIONS
 from gui.light_source_controller import LightSourceController
 
 OUTPUT_PATH = Path(__file__).parent
@@ -24,7 +25,6 @@ LOGO_PATH = ASSETS_PATH / "logo_aitu.png"
 ICON_HOME_PATH = ASSETS_PATH / "logo_home.png"
 ICON_SETTING_PATH = ASSETS_PATH / "logo_setting.png"
 PROJECT_ROOT = OUTPUT_PATH.parents[1]
-FABRIC_TYPE_OPTIONS = ["矩形布料10050", "U形布料10050", "衬衫布料10050"]
 OFFSET_MODE_OPTIONS = [
     "中心点偏差估计",
     "左上端点偏差估计",
@@ -186,6 +186,14 @@ class MainWindow(Toplevel):
             "黑色布料": {"hsv_lower": [0, 0, 0], "hsv_upper": [360, 100, 35]},
             "浅紫色布料": {"hsv_lower": [260, 10, 60], "hsv_upper": [280, 80, 100]},
             "紫色布料": {"hsv_lower": [250, 20, 30], "hsv_upper": [310, 100, 100]},
+            "红色布料": {"hsv_lower": [0, 40, 30], "hsv_upper": [15, 100, 100]},
+            "橙色布料": {"hsv_lower": [15, 40, 40], "hsv_upper": [40, 100, 100]},
+            "黄色布料": {"hsv_lower": [40, 35, 40], "hsv_upper": [70, 100, 100]},
+            "绿色布料": {"hsv_lower": [70, 30, 20], "hsv_upper": [160, 100, 100]},
+            "浅蓝色布料": {"hsv_lower": [160, 15, 55], "hsv_upper": [200, 55, 100]},
+            "蓝色布料": {"hsv_lower": [200, 30, 20], "hsv_upper": [250, 100, 100]},
+            "粉色布料": {"hsv_lower": [300, 15, 60], "hsv_upper": [345, 55, 100]},
+            "灰色布料": {"hsv_lower": [0, 0, 35], "hsv_upper": [360, 15, 70]},
         }
 
     @staticmethod
@@ -532,9 +540,14 @@ class MainWindow(Toplevel):
         print(message)
         self._append_debug_log(message)
 
+    def _emit_light_log(self, message):
+        # Light source control logs are shown only in the GUI debug page,
+        # not printed to the console.
+        self._append_debug_log(message)
+
     def _wire_event_loggers(self):
         if hasattr(self, "light_controller") and self.light_controller is not None:
-            self.light_controller.set_logger(self._emit_event_log)
+            self.light_controller.set_logger(self._emit_light_log)
 
     def handle_btn_press(self, target, indicator_y):
         self.sidebar_indicator.place(x=0, y=indicator_y, height=46, width=6)
@@ -605,7 +618,10 @@ class MainWindow(Toplevel):
     def get_runtime_settings(self):
         return dict(self.runtime_settings)
 
-    def apply_runtime_settings(self, new_settings):
+    def _normalize_settings(self, new_settings):
+        """Merge new_settings on top of the currently applied runtime settings
+        and normalize/clamp all fields. Pure function: does not mutate
+        self.runtime_settings or any live hardware state."""
         def _clamp_int(value, low, high):
             return max(low, min(high, int(value)))
 
@@ -647,8 +663,8 @@ class MainWindow(Toplevel):
         merged["light_intensity"] = _clamp_int(merged.get("light_intensity", 50), 0, 255)
         merged["light_enabled"] = bool(merged.get("light_enabled", False))
 
-        self.ref_colors = self._load_ref_colors()
-        preset = self.ref_colors.get(merged["fabric_color_mode"])
+        ref_colors = self._load_ref_colors()
+        preset = ref_colors.get(merged["fabric_color_mode"])
         if preset is None:
             hsv_lower = merged.get("hsv_lower", [260, 10, 60])
             hsv_upper = merged.get("hsv_upper", [280, 80, 100])
@@ -657,6 +673,11 @@ class MainWindow(Toplevel):
         else:
             merged["hsv_lower"] = list(preset["hsv_lower"])
             merged["hsv_upper"] = list(preset["hsv_upper"])
+        return merged, ref_colors
+
+    def apply_runtime_settings(self, new_settings):
+        merged, ref_colors = self._normalize_settings(new_settings)
+        self.ref_colors = ref_colors
         self.runtime_settings = merged
         if self.camera is not None:
             self.camera.update_exposure(self.runtime_settings["exposure_us"])
@@ -682,6 +703,18 @@ class MainWindow(Toplevel):
                 json.dump(self.runtime_settings, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+
+    def save_runtime_settings_only(self, new_settings):
+        """Persist new_settings to disk without applying them to the live
+        camera/light/processing state. The currently applied
+        self.runtime_settings is left untouched."""
+        merged, _ref_colors = self._normalize_settings(new_settings)
+        try:
+            with open(self.settings_path, "w", encoding="utf-8") as f:
+                json.dump(merged, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        return merged
 
     def reload_runtime_settings(self):
         self.runtime_settings = self._load_runtime_settings()
