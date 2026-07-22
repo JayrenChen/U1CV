@@ -24,6 +24,14 @@ LOGO_PATH = ASSETS_PATH / "logo_aitu.png"
 ICON_HOME_PATH = ASSETS_PATH / "logo_home.png"
 ICON_SETTING_PATH = ASSETS_PATH / "logo_setting.png"
 PROJECT_ROOT = OUTPUT_PATH.parents[1]
+FABRIC_TYPE_OPTIONS = ["矩形布料10050", "U形布料10050", "衬衫布料10050"]
+OFFSET_MODE_OPTIONS = [
+    "中心点偏差估计",
+    "左上端点偏差估计",
+    "右上端点偏差估计",
+    "左下角偏差估计",
+    "右下角偏差估计",
+]
 LOCAL_FONT_CANDIDATES = {
     "msyh.ttf": [
         OUTPUT_PATH / "assets" / "font" / "msyh.ttf",
@@ -86,7 +94,7 @@ class MainWindow(Toplevel):
             "calib_pattern_cols": 11,
             "calib_pattern_rows": 8,
             "calib_square_size_mm": 15.0,
-            "fabric_type": "矩形布料",
+            "fabric_type": "矩形布料10050",
             "offset_estimation_mode": "中心点偏差估计",
             "fabric_color_mode": "浅紫色布料",
             "hsv_lower": [260, 10, 60],
@@ -224,6 +232,23 @@ class MainWindow(Toplevel):
             "彩色布料": "浅紫色布料",
         }
         return legacy_map.get(mode, mode or "浅紫色布料")
+
+    @staticmethod
+    def _normalize_fabric_type(value):
+        name = str(value or "").strip()
+        legacy_map = {
+            "矩形布料": "矩形布料10050",
+            "U型布料": "U形布料10050",
+            "U形布料": "U形布料10050",
+            "U型布料10050": "U形布料10050",
+        }
+        normalized = legacy_map.get(name, name)
+        return normalized if normalized in FABRIC_TYPE_OPTIONS else FABRIC_TYPE_OPTIONS[0]
+
+    @staticmethod
+    def _normalize_offset_estimation_mode(value):
+        name = str(value or "").strip()
+        return name if name in OFFSET_MODE_OPTIONS else OFFSET_MODE_OPTIONS[0]
 
     def _resolve_ui_font_family(self):
         available = list(tkfont.families(self))
@@ -571,6 +596,8 @@ class MainWindow(Toplevel):
             settings["light_serial_port"] = self.default_light_serial_port
 
         settings["light_serial_port"] = self._normalize_light_serial_port(settings.get("light_serial_port", ""))
+        settings["fabric_type"] = self._normalize_fabric_type(settings.get("fabric_type", FABRIC_TYPE_OPTIONS[0]))
+        settings["offset_estimation_mode"] = self._normalize_offset_estimation_mode(settings.get("offset_estimation_mode", OFFSET_MODE_OPTIONS[0]))
         settings["fabric_color_mode"] = self._normalize_fabric_color_mode(settings.get("fabric_color_mode", "浅紫色布料"))
         settings["runtime_platform"] = current_platform
         return settings
@@ -610,8 +637,8 @@ class MainWindow(Toplevel):
             merged["topview_x_max_mm"] = merged["topview_x_min_mm"] + 1.0
         if merged["topview_y_max_mm"] <= merged["topview_y_min_mm"]:
             merged["topview_y_max_mm"] = merged["topview_y_min_mm"] + 1.0
-        merged["fabric_type"] = str(merged.get("fabric_type", "矩形布料"))
-        merged["offset_estimation_mode"] = str(merged.get("offset_estimation_mode", "中心点偏差估计"))
+        merged["fabric_type"] = self._normalize_fabric_type(merged.get("fabric_type", FABRIC_TYPE_OPTIONS[0]))
+        merged["offset_estimation_mode"] = self._normalize_offset_estimation_mode(merged.get("offset_estimation_mode", OFFSET_MODE_OPTIONS[0]))
         merged["fabric_color_mode"] = self._normalize_fabric_color_mode(merged.get("fabric_color_mode", "浅紫色布料"))
         merged["auto_save_on_process"] = bool(merged.get("auto_save_on_process", False))
         merged["light_serial_port"] = self._normalize_light_serial_port(merged.get("light_serial_port", ""))
