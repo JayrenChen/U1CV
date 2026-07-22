@@ -12,13 +12,40 @@ REF_OBJ_NPZ_PATH = BASE_DIR / "ref_obj_mm.npz"
 REF_COLOR_PATH = BASE_DIR / "ref_color.json"
 ILLUMINATION_GAIN_PATH = BASE_DIR / "illumination_gain.npz"
 
-FABRIC_REF_OBJ_KEY_MAP = {
+FABRIC_REF_OBJ_KEY_MAP_DEFAULT = {
     "矩形布料10050": "box10050_mm",
     "U形布料10050": "ushape10050_mm",
     "衬衫布料10050": "shirt10050_mm",
-    # Legacy compatibility
-    "矩形布料": "box_mm",
 }
+
+
+def _load_fabric_ref_obj_key_map(path):
+    """Load the fabric-name -> ref-obj-key mapping from ref_obj_mm.json's
+    "fabric_types" entry, falling back to the built-in defaults if the file
+    or the entry is missing/invalid."""
+    result = dict(FABRIC_REF_OBJ_KEY_MAP_DEFAULT)
+    try:
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                fabric_types = data.get("fabric_types")
+                if isinstance(fabric_types, dict) and fabric_types:
+                    loaded = {
+                        str(name).strip(): str(key).strip()
+                        for name, key in fabric_types.items()
+                        if str(name).strip() and str(key).strip()
+                    }
+                    if loaded:
+                        result = loaded
+    except Exception:
+        pass
+    return result
+
+
+FABRIC_REF_OBJ_KEY_MAP = _load_fabric_ref_obj_key_map(REF_OBJ_JSON_PATH)
+FABRIC_TYPE_OPTIONS = list(FABRIC_REF_OBJ_KEY_MAP.keys())
+# Legacy compatibility alias, not exposed as a selectable fabric type option.
+FABRIC_REF_OBJ_KEY_MAP["矩形布料"] = "box_mm"
 
 
 class ProcessingEngine:
@@ -282,7 +309,7 @@ class ProcessingEngine:
         return cv2.addWeighted(img_, 0.4, img, 0.6, 0)
     
     def draw_ref_obj(self, img, ref_obj_px):
-        print(f"Drawing reference object for fabric type: {self.fabric_type}")
+        # print(f"Drawing reference object for fabric type: {self.fabric_type}")
         if self.fabric_type == "U形布料10050":
             _ref_obj_mm = np.asarray(self.ref_obj, dtype=np.float32).reshape(-1, 2)
             if _ref_obj_mm.shape[0] < 4:
