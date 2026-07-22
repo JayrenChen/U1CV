@@ -13,17 +13,17 @@
   "calib_pattern_cols": 11,
   "calib_pattern_rows": 8,
   "calib_square_size_mm": 15.0,
-  "fabric_type": "矩形布料",
-  "offset_estimation_mode": "左上端点偏差估计",
-  "fabric_color_mode": "浅紫色布料",
+  "fabric_type": "衬衫布料10050",
+  "offset_estimation_mode": "左下角偏差估计",
+  "fabric_color_mode": "紫色布料",
   "hsv_lower": [
-    260,
-    10,
-    60
+    250,
+    20,
+    30
   ],
   "hsv_upper": [
-    280,
-    80,
+    310,
+    100,
     100
   ],
   "auto_save_on_process": false,

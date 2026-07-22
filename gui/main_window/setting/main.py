@@ -9,6 +9,15 @@ OUTPUT_PATH = Path(__file__).parent
 ASSETS_PATH = OUTPUT_PATH / Path("./assets")
 REF_COLOR_PATH = OUTPUT_PATH.parents[1] / "ref_color.json"
 
+FABRIC_TYPE_OPTIONS = ["矩形布料10050", "U形布料10050", "衬衫布料10050"]
+OFFSET_MODE_OPTIONS = [
+    "中心点偏差估计",
+    "左上端点偏差估计",
+    "右上端点偏差估计",
+    "左下角偏差估计",
+    "右下角偏差估计",
+]
+
 
 def relative_to_assets(path: str) -> Path:
     return ASSETS_PATH / Path(path)
@@ -47,6 +56,22 @@ class Setting(Frame):
             "彩色布料": "浅紫色布料",
         }
         return legacy_map.get(name, name or "浅紫色布料")
+
+    @staticmethod
+    def _normalize_fabric_type(value):
+        name = str(value or "").strip()
+        legacy_map = {
+            "矩形布料": "矩形布料10050",
+            "U型布料": "U形布料10050",
+            "U形布料": "U形布料10050",
+        }
+        normalized = legacy_map.get(name, name)
+        return normalized if normalized in FABRIC_TYPE_OPTIONS else FABRIC_TYPE_OPTIONS[0]
+
+    @staticmethod
+    def _normalize_offset_mode(value):
+        name = str(value or "").strip()
+        return name if name in OFFSET_MODE_OPTIONS else OFFSET_MODE_OPTIONS[0]
 
     def _sanitize_hsv_triplet(self, values, default_values):
         try:
@@ -175,7 +200,7 @@ class Setting(Frame):
             "标定棋盘列角点": StringVar(value="11"),
             "标定棋盘行角点": StringVar(value="8"),
             "标定格子边长(mm)": StringVar(value="15.0"),
-            "布料类型": StringVar(value="矩形布料"),
+            "布料类型": StringVar(value="矩形布料10050"),
             "偏移估计模式": StringVar(value="中心点偏差估计"),
             "布料颜色": StringVar(value="浅紫色布料"),
             "HSV下界H": StringVar(value="0"),
@@ -251,7 +276,7 @@ class Setting(Frame):
         fabric_combo = ttk.Combobox(
             alg_card,
             textvariable=self.setting_vars["布料类型"],
-            values=["矩形布料", "U形布料"],
+            values=FABRIC_TYPE_OPTIONS,
             state="readonly",
         )
         fabric_combo.grid(row=row_idx, column=1, sticky="ew", pady=5)
@@ -261,7 +286,7 @@ class Setting(Frame):
         offset_mode_combo = ttk.Combobox(
             alg_card,
             textvariable=self.setting_vars["偏移估计模式"],
-            values=["中心点偏差估计", "左上端点偏差估计", "右上端点偏差估计"],
+            values=OFFSET_MODE_OPTIONS,
             state="readonly",
         )
         offset_mode_combo.grid(row=row_idx, column=1, sticky="ew", pady=5)
@@ -408,8 +433,8 @@ class Setting(Frame):
         self.setting_vars["标定棋盘列角点"].set(str(settings.get("calib_pattern_cols", 11)))
         self.setting_vars["标定棋盘行角点"].set(str(settings.get("calib_pattern_rows", 8)))
         self.setting_vars["标定格子边长(mm)"].set(str(settings.get("calib_square_size_mm", 15.0)))
-        self.setting_vars["布料类型"].set(str(settings.get("fabric_type", "矩形布料")))
-        self.setting_vars["偏移估计模式"].set(str(settings.get("offset_estimation_mode", "中心点偏差估计")))
+        self.setting_vars["布料类型"].set(self._normalize_fabric_type(settings.get("fabric_type", FABRIC_TYPE_OPTIONS[0])))
+        self.setting_vars["偏移估计模式"].set(self._normalize_offset_mode(settings.get("offset_estimation_mode", OFFSET_MODE_OPTIONS[0])))
         color_name = self._normalize_fabric_color_name(settings.get("fabric_color_mode", "浅紫色布料"))
         if color_name not in self.ref_colors:
             hsv_lower_settings = settings.get("hsv_lower", [260, 10, 60])
@@ -492,7 +517,7 @@ class Setting(Frame):
             "calib_pattern_cols": 11,
             "calib_pattern_rows": 8,
             "calib_square_size_mm": 15.0,
-            "fabric_type": "矩形布料",
+            "fabric_type": "矩形布料10050",
             "offset_estimation_mode": "中心点偏差估计",
             "fabric_color_mode": "浅紫色布料",
             "hsv_lower": [260, 10, 60],

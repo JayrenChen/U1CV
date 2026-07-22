@@ -12,6 +12,14 @@ REF_OBJ_NPZ_PATH = BASE_DIR / "ref_obj_mm.npz"
 REF_COLOR_PATH = BASE_DIR / "ref_color.json"
 ILLUMINATION_GAIN_PATH = BASE_DIR / "illumination_gain.npz"
 
+FABRIC_REF_OBJ_KEY_MAP = {
+    "矩形布料10050": "box10050_mm",
+    "U形布料10050": "ushape10050_mm",
+    "衬衫布料10050": "shirt10050_mm",
+    # Legacy compatibility
+    "矩形布料": "box_mm",
+}
+
 
 class ProcessingEngine:
     """Image processing pipeline adapted from Demo05 for GUI use."""
@@ -35,7 +43,7 @@ class ProcessingEngine:
         self.anchor_ymm = 10.0
         self.anchor_wmm = 30.0
         self.anchor_hmm = 30.0
-        self.fabric_type = "矩形布料"
+        self.fabric_type = "矩形布料10050"
         self.offset_estimation_mode = "中心点偏差估计"
         self.fabric_color_mode = "浅紫色布料"
         self.hsv_lower = np.array([260, 10, 60], dtype=np.float32)
@@ -47,7 +55,7 @@ class ProcessingEngine:
         self.y_max_mm = 280.0
 
         self.ori = [0.0, 0.0, 0.0]
-        self.box_ref = self._load_reference_box()
+        self.ref_obj = self._load_reference_box()
 
         self.T = None
         self.S = None
@@ -132,19 +140,30 @@ class ProcessingEngine:
         self._load_ref_obj()
         self._load_ref_colors()
         self._load_illumination_gain()
-        self.box_ref = self._load_reference_box()
+        self.ref_obj = self._load_reference_box()
         self._recompute_projection()
 
     def _load_reference_box(self):
-        if isinstance(self._ref_obj, dict) and "box_mm" in self._ref_obj:
-            pts = np.asarray(self._ref_obj["box_mm"], dtype=np.float32).reshape(-1, 2)
-            if pts.shape[0] >= 4:
-                return self._order_box_points(pts[:4])
-        if self._ref_obj is not None and hasattr(self._ref_obj, "files") and "box_mm" in self._ref_obj.files:
-            pts = np.asarray(self._ref_obj["box_mm"], dtype=np.float32).reshape(-1, 2)
-            if pts.shape[0] >= 4:
-                return self._order_box_points(pts[:4])
-        return np.array([[0, 0], [40, 0], [40, 40], [0, 40]], dtype=np.float32)
+        selected_key = FABRIC_REF_OBJ_KEY_MAP.get(self.fabric_type, "box10050_mm")
+        key_candidates = [selected_key, "box10050_mm", "box_mm"]
+
+        if isinstance(self._ref_obj, dict):
+            for key in key_candidates:
+                if key not in self._ref_obj:
+                    continue
+                pts = np.asarray(self._ref_obj[key], dtype=np.float32).reshape(-1, 2)
+                if pts.shape[0] >= 4:
+                    return self._order_box_points(pts[:4])
+
+        if self._ref_obj is not None and hasattr(self._ref_obj, "files"):
+            for key in key_candidates:
+                if key not in self._ref_obj.files:
+                    continue
+                pts = np.asarray(self._ref_obj[key], dtype=np.float32).reshape(-1, 2)
+                if pts.shape[0] >= 4:
+                    return self._order_box_points(pts[:4])
+
+        return np.array([[0, 0], [100, 0], [100, 50], [0, 50]], dtype=np.float32)
 
     def apply_settings(self, settings: dict):
         def _clamp_int(value, low, high):
@@ -165,6 +184,7 @@ class ProcessingEngine:
         self.anchor_wmm = float(settings.get("anchor_wmm", self.anchor_wmm))
         self.anchor_hmm = float(settings.get("anchor_hmm", self.anchor_hmm))
         self.fabric_type = str(settings.get("fabric_type", self.fabric_type))
+        self.ref_obj = self._load_reference_box()
         self.offset_estimation_mode = str(settings.get("offset_estimation_mode", self.offset_estimation_mode))
 
         self._load_ref_colors()
@@ -260,6 +280,34 @@ class ProcessingEngine:
         box_px_i = np.round(np.asarray(box_px, dtype=np.float32).reshape(-1, 2)).astype(np.int32)
         cv2.fillPoly(img_, [box_px_i], (0, 255, 0))
         return cv2.addWeighted(img_, 0.4, img, 0.6, 0)
+    
+    def draw_ref_obj(self, img, ref_obj_px):
+        print(f"Drawing reference object for fabric type: {self.fabric_type}")
+        if self.fabric_type == "U形布料10050":
+            _ref_obj_mm = np.asarray(self.ref_obj, dtype=np.float32).reshape(-1, 2)
+            if _ref_obj_mm.shape[0] < 4:
+                return self.draw_ref_box(img, ref_obj_px)
+
+            _angles = np.linspace(np.pi, 2*np.pi, 100)
+            _ref_obj_circle_mm = np.array([[10*np.cos(angle), 10*np.sin(angle)] for angle in _angles], dtype=np.float32)
+            _ref_obj_circle_mm[0:50] = _ref_obj_circle_mm[0:50] + _ref_obj_mm[0] + [10,10]
+            _ref_obj_circle_mm[50:100] = _ref_obj_circle_mm[50:100] + _ref_obj_mm[1] + [-10,10]
+            _ref_obj_circle_mm = np.vstack([_ref_obj_circle_mm, _ref_obj_mm[2], _ref_obj_mm[3]])
+            _ref_obj_circle_px = np.array([self._to_image_coord(float(p[0]), float(p[1])) for p in _ref_obj_circle_mm], dtype=np.float32)
+            return self.draw_ref_box(img, _ref_obj_circle_px)
+        if self.fabric_type == "衬衫布料10050":
+            _ref_obj_mm = np.asarray(self.ref_obj, dtype=np.float32).reshape(-1, 2)
+            if _ref_obj_mm.shape[0] < 4:
+                return self.draw_ref_box(img, ref_obj_px)
+
+            _angles = np.linspace(np.pi, 0.5*np.pi, 50)
+            _ref_obj_circle_mm = np.array([[20*np.cos(angle), 20*np.sin(angle)] for angle in _angles], dtype=np.float32)
+            _ref_obj_circle_mm = _ref_obj_circle_mm + _ref_obj_mm[1]
+            _ref_obj_circle_mm = np.vstack([_ref_obj_mm[0], _ref_obj_circle_mm, _ref_obj_mm[2], _ref_obj_mm[3]])
+            _ref_obj_circle_px = np.array([self._to_image_coord(float(p[0]), float(p[1])) for p in _ref_obj_circle_mm], dtype=np.float32)
+            return self.draw_ref_box(img, _ref_obj_circle_px)
+        else:
+            return self.draw_ref_box(img, ref_obj_px)
     
     def draw_detected_object(self, img, points, color=(0, 0, 255), thickness=4):
         img_ = img.copy()
@@ -360,10 +408,10 @@ class ProcessingEngine:
 
         c_ref = ref.mean(axis=0)
         c_det = det.mean(axis=0)
-        print(f"Reference points: {ref}, Detected points: {det}")
+        # print(f"Reference points: {ref}, Detected points: {det}")
         X = ref - c_ref
         Y = det - c_det
-        print(f"Centered reference points: {X}, Centered detected points: {Y}")
+        # print(f"Centered reference points: {X}, Centered detected points: {Y}")
 
         H = X.T @ Y
         U, _, Vt = np.linalg.svd(H)
@@ -382,6 +430,10 @@ class ProcessingEngine:
             d = det[0] - ref[0]
         elif offset_mode == "右上端点偏差估计":
             d = det[1] - ref[1]
+        elif offset_mode == "右下角偏差估计":
+            d = det[-2] - ref[-2]
+        elif offset_mode == "左下角偏差估计":
+            d = det[-1] - ref[-1]
         else:
             d = c_det - c_ref
 
@@ -412,35 +464,29 @@ class ProcessingEngine:
         return x_px, y_px
 
     def process(self, frame: np.ndarray) -> dict:
+        # 0. 初始化结果列表
+        result = { "offset_x_mm": None, "offset_y_mm": None, "theta_deg": None, "rmse": None, 
+            "width_mm": None, "length_mm": None, "area_mm2": None, "left_top": None, "angle_deg": None,}
         # 1. 图像变换（去畸变+透视变换）
         im_undist = self._undistort(frame)
         im_proj = self._project(im_undist)
         im_ill_corr = self._apply_illumination_correction(im_proj)
         # 2. 寻找坐标系原点+绘制参考区域（TODO：寻找原点不鲁棒）
         self.ori, im_ori_crop = self._detect_ori(im_ill_corr)
-        box_ref_px = np.array([self._to_image_coord(float(p[0]), float(p[1])) for p in self.box_ref], dtype=np.float32)
-        im_ref = self.draw_ref_box(self.draw_ori(im_ill_corr), box_ref_px)
         # 3. 图像预处理(灰度+滤波+二值化+最大联通+闭运算)
         im_pre = self._preprocess(im_ill_corr)
-        # 4. 检测矩形目标
-        box_detected = self._detect_box(im_pre)
-        im_final = self.draw_detected_object(im_ref, box_detected)
-        # 5. 估计平移+旋转
-        found = box_detected is not None
-        result = {
-            "offset_x_mm": None,
-            "offset_y_mm": None,
-            "theta_deg": None,
-            "rmse": None,
-            "width_mm": None,
-            "length_mm": None,
-            "area_mm2": None,
-            "left_top": None,
-            "angle_deg": None,
-        }
 
+        # 4. 检测目标
+        box_detected = self._detect_box(im_pre)
+        ref_obj_px = np.array([self._to_image_coord(float(p[0]), float(p[1])) for p in self.ref_obj], dtype=np.float32)
+        # 5. 绘制结果
+        im_ref = self.draw_ref_obj(self.draw_ori(im_ill_corr), ref_obj_px)
+        im_final = self.draw_detected_object(im_ref, box_detected)
+
+        # 6. 估计平移+旋转
+        found = box_detected is not None
         if found:
-            dx, dy, theta, rmse = self._estimate_transfer(box_ref_px, box_detected, self.offset_estimation_mode)
+            dx, dy, theta, rmse = self._estimate_transfer(ref_obj_px, box_detected, self.offset_estimation_mode)
             rect = cv2.minAreaRect(box_detected.astype(np.float32))
             w_px, h_px = rect[1]
             width_mm  = float(min(w_px, h_px) / max(self.ppm, 1e-6))
