@@ -358,7 +358,7 @@ class ProcessingEngine:
         crop = img[y:y2, x:x2]
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop.copy()
         blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        _, bw = cv2.threshold(blur, 30, 255, cv2.THRESH_BINARY_INV)
+        _, bw = cv2.threshold(blur, self.bin_thresh, 255, cv2.THRESH_BINARY_INV)
         contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return [0.0, 0.0, 0.0], crop

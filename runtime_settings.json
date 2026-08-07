@@ -29,7 +29,7 @@
   "auto_save_on_process": false,
   "light_serial_port": "COM3",
   "light_baudrate": 19200,
-  "light_intensity": 40,
+  "light_intensity": 45,
   "light_enabled": true,
   "runtime_platform": "windows"
 }
