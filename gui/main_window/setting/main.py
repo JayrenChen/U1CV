@@ -2,7 +2,7 @@ from pathlib import Path
 import json
 import platform
 import tkinter as tk
-from tkinter import Frame, StringVar
+from tkinter import Frame, StringVar, Toplevel
 from tkinter import ttk, messagebox
 
 from gui.image_processing import FABRIC_TYPE_OPTIONS
@@ -191,6 +191,7 @@ class Setting(Frame):
         save_card.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
 
         self.setting_vars = {
+            "当前相机": StringVar(value=""),
             "曝光时间(us)": StringVar(value="50000"),
             "光源串口": StringVar(value=""),
             "光源波特率": StringVar(value="19200"),
@@ -237,30 +238,34 @@ class Setting(Frame):
             "标定格子边长(mm)",
         ]
 
-        ttk.Label(cam_card, text="曝光时间(us):", style="Key.TLabel").grid(row=0, column=0, sticky="w", pady=5, padx=(0, 8))
-        ttk.Entry(cam_card, textvariable=self.setting_vars["曝光时间(us)"]).grid(row=0, column=1, sticky="ew", pady=5)
+        ttk.Label(cam_card, text="当前相机:", style="Key.TLabel").grid(row=0, column=0, sticky="w", pady=5, padx=(0, 8))
+        ttk.Entry(cam_card, textvariable=self.setting_vars["当前相机"], state="readonly").grid(row=0, column=1, sticky="ew", pady=5)
+        ttk.Button(cam_card, text="选择相机", command=self._on_choose_camera, width=10).grid(row=0, column=2, sticky="w", padx=(8, 0), pady=5)
 
-        ttk.Label(cam_card, text="光源串口:", style="Key.TLabel").grid(row=1, column=0, sticky="w", pady=5, padx=(0, 8))
+        ttk.Label(cam_card, text="曝光时间(us):", style="Key.TLabel").grid(row=1, column=0, sticky="w", pady=5, padx=(0, 8))
+        ttk.Entry(cam_card, textvariable=self.setting_vars["曝光时间(us)"]).grid(row=1, column=1, sticky="ew", pady=5)
+
+        ttk.Label(cam_card, text="光源串口:", style="Key.TLabel").grid(row=2, column=0, sticky="w", pady=5, padx=(0, 8))
         self.light_port_combo = ttk.Combobox(cam_card, textvariable=self.setting_vars["光源串口"], state="readonly")
-        self.light_port_combo.grid(row=1, column=1, sticky="ew", pady=5)
-        ttk.Button(cam_card, text="刷新", command=self._refresh_light_ports, width=10).grid(row=1, column=2, sticky="w", padx=(8, 0), pady=5)
+        self.light_port_combo.grid(row=2, column=1, sticky="ew", pady=5)
+        ttk.Button(cam_card, text="刷新", command=self._refresh_light_ports, width=10).grid(row=2, column=2, sticky="w", padx=(8, 0), pady=5)
 
-        ttk.Label(cam_card, text="光源波特率:", style="Key.TLabel").grid(row=2, column=0, sticky="w", pady=5, padx=(0, 8))
+        ttk.Label(cam_card, text="光源波特率:", style="Key.TLabel").grid(row=3, column=0, sticky="w", pady=5, padx=(0, 8))
         self.light_baud_combo = ttk.Combobox(
             cam_card,
             textvariable=self.setting_vars["光源波特率"],
             values=["19200", "9600", "4800", "2400", "57600", "115200"],
             state="readonly",
         )
-        self.light_baud_combo.grid(row=2, column=1, sticky="ew", pady=5)
-        ttk.Button(cam_card, text="在线检测", command=self._on_check_light_online, width=10).grid(row=2, column=2, sticky="w", padx=(8, 0), pady=5)
+        self.light_baud_combo.grid(row=3, column=1, sticky="ew", pady=5)
+        ttk.Button(cam_card, text="在线检测", command=self._on_check_light_online, width=10).grid(row=3, column=2, sticky="w", padx=(8, 0), pady=5)
 
-        ttk.Label(cam_card, text="光源强度:", style="Key.TLabel").grid(row=3, column=0, sticky="w", padx=(0, 8))
+        ttk.Label(cam_card, text="光源强度:", style="Key.TLabel").grid(row=4, column=0, sticky="w", padx=(0, 8))
         self.light_intensity_spin = tk.Spinbox(cam_card, from_=0, to=255, textvariable=self.setting_vars["光源强度"])
-        self.light_intensity_spin.grid(row=3, column=1, sticky="ew", pady=5)
+        self.light_intensity_spin.grid(row=4, column=1, sticky="ew", pady=5)
         # ttk.Label(light_control_row, text="开关:", style="Key.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 6))
         self.light_switch_combo = ttk.Combobox(cam_card, textvariable=self.setting_vars["光源开关"], values=["开", "关"], state="readonly", width=9) 
-        self.light_switch_combo.grid(row=3, column=2, sticky="w", padx=(8, 0), pady=5)
+        self.light_switch_combo.grid(row=4, column=2, sticky="w", padx=(8, 0), pady=5)
 
         cam_card.columnconfigure(1, weight=1)
         cam_card.columnconfigure(2, weight=0)
@@ -378,6 +383,74 @@ class Setting(Frame):
         for entry in getattr(self, "hsv_entries", []):
             entry.configure(state=state)
 
+    def _get_camera_device_rows(self):
+        if self.controller is None:
+            return []
+        try:
+            return list(self.controller.list_camera_devices())
+        except Exception:
+            return []
+
+    def _on_choose_camera(self):
+        devices = self._get_camera_device_rows()
+        if not devices:
+            messagebox.showwarning("相机选择", "未检测到可用相机")
+            return
+
+        dialog = Toplevel(self)
+        dialog.title("选择相机")
+        dialog.transient(self.winfo_toplevel())
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        wrapper = ttk.Frame(dialog, padding=12)
+        wrapper.pack(fill="both", expand=True)
+
+        ttk.Label(wrapper, text="选择相机型号 + SN", style="Title.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        options = []
+        option_map = {}
+        for info in devices:
+            display_name = str(info.get("display_name", "")).strip() or f"{info.get('model_name', '未知型号')} / SN:未知"
+            camera_key = str(info.get("camera_key", "")).strip()
+            options.append(display_name)
+            option_map[display_name] = camera_key
+
+        current_display = ""
+        if self.controller is not None and hasattr(self.controller, "get_active_camera_display"):
+            current_display = str(self.controller.get_active_camera_display()).strip()
+        selected_var = StringVar(value=current_display if current_display in options else options[0])
+        combo = ttk.Combobox(wrapper, textvariable=selected_var, values=options, state="readonly", width=48)
+        combo.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+
+        def _confirm():
+            selected_display = selected_var.get().strip()
+            selected_key = option_map.get(selected_display, "")
+            if not selected_key:
+                messagebox.showwarning("相机选择", "请选择一个有效相机")
+                return
+            try:
+                if self.controller is not None:
+                    self.controller.set_active_camera(selected_key, persist=True)
+                    self._fill_vars(self.controller.get_runtime_settings())
+                dialog.destroy()
+                messagebox.showinfo("相机选择", f"已切换到: {selected_display}")
+            except Exception as exc:
+                messagebox.showerror("相机选择", f"切换失败: {exc}")
+
+        ttk.Button(wrapper, text="确定", command=_confirm, style="Primary.TButton").grid(row=2, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(wrapper, text="取消", command=dialog.destroy).grid(row=2, column=1, sticky="ew", padx=(6, 0))
+
+        wrapper.columnconfigure(0, weight=1)
+        wrapper.columnconfigure(1, weight=1)
+
+        dialog.update_idletasks()
+        width = dialog.winfo_reqwidth()
+        height = dialog.winfo_reqheight()
+        x = max(0, (dialog.winfo_screenwidth() - width) // 2)
+        y = max(0, (dialog.winfo_screenheight() - height) // 2)
+        dialog.geometry(f"+{x}+{y}")
+
     def _collect_settings(self):
         hsv_lower = [
             self._clamp_int(self.setting_vars["HSV下界H"].get(), 0, 360),
@@ -421,6 +494,10 @@ class Setting(Frame):
         if hasattr(self, "fabric_color_combo"):
             self.fabric_color_combo.configure(values=self._get_color_options())
         self._refresh_light_ports()
+        if hasattr(self.controller, "get_active_camera_display"):
+            self.setting_vars["当前相机"].set(self.controller.get_active_camera_display())
+        elif hasattr(self.controller, "get_active_camera_key"):
+            self.setting_vars["当前相机"].set(self.controller.get_active_camera_key())
         self.setting_vars["曝光时间(us)"].set(str(settings.get("exposure_us", 50000)))
         light_port = str(settings.get("light_serial_port", "")).strip()
         if not light_port:
@@ -511,6 +588,7 @@ class Setting(Frame):
     def _on_reset(self):
         default_light_port = "/dev/ttyUSB0" if platform.system().lower() == "linux" else ""
         defaults = {
+            "当前相机": self.setting_vars["当前相机"].get(),
             "exposure_us": 50000,
             "bin_thresh": 60,
             "ppm": 5.0,

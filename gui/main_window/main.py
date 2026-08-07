@@ -32,6 +32,9 @@ OFFSET_MODE_OPTIONS = [
     "左下角偏差估计",
     "右下角偏差估计",
 ]
+CAMERA_PROFILES_KEY = "camera_profiles"
+ACTIVE_CAMERA_KEY = "active_camera_key"
+DEFAULT_CAMERA_KEY = "__default__"
 LOCAL_FONT_CANDIDATES = {
     "msyh.ttf": [
         OUTPUT_PATH / "assets" / "font" / "msyh.ttf",
@@ -74,6 +77,9 @@ class MainWindow(Toplevel):
 
         self.current_window = None
         self.camera = None
+        self.camera_profiles = {}
+        self.active_camera_key = DEFAULT_CAMERA_KEY
+        self.active_camera_info = {}
         self.light_controller = LightSourceController()
         self.default_light_serial_port = "/dev/ttyUSB0" if platform.system().lower() == "linux" else ""
         self.settings_path = SETTINGS_PATH
@@ -257,6 +263,109 @@ class MainWindow(Toplevel):
     def _normalize_offset_estimation_mode(value):
         name = str(value or "").strip()
         return name if name in OFFSET_MODE_OPTIONS else OFFSET_MODE_OPTIONS[0]
+
+    @staticmethod
+    def _sanitize_camera_key(value):
+        return str(value or "").strip()
+
+    @staticmethod
+    def _camera_key_from_info(camera_info):
+        model_name = str(camera_info.get("model_name", "")).strip()
+        serial_number = str(camera_info.get("serial_number", "")).strip()
+        if model_name or serial_number:
+            return f"{model_name}||{serial_number}"
+        return str(camera_info.get("camera_key", "")).strip()
+
+    @staticmethod
+    def _camera_display_name(camera_info):
+        model_name = str(camera_info.get("model_name", "")).strip() or "未知型号"
+        serial_number = str(camera_info.get("serial_number", "")).strip()
+        if serial_number:
+            return f"{model_name} / SN:{serial_number}"
+        return f"{model_name} / SN:未知"
+
+    @staticmethod
+    def _split_camera_key(camera_key):
+        text = str(camera_key or "").strip()
+        if "||" in text:
+            model_name, serial_number = text.split("||", 1)
+            return model_name.strip(), serial_number.strip()
+        return text, ""
+
+    def list_camera_devices(self):
+        try:
+            return list(CameraInterface.list_devices())
+        except Exception:
+            return []
+
+    def get_active_camera_key(self):
+        return self.active_camera_key
+
+    def get_active_camera_display(self):
+        if self.active_camera_info:
+            return self._camera_display_name(self.active_camera_info)
+        model_name, serial_number = self._split_camera_key(self.active_camera_key)
+        if model_name or serial_number:
+            return self._camera_display_name({"model_name": model_name, "serial_number": serial_number})
+        return "默认相机"
+
+    def _default_camera_profile(self):
+        return dict(self.default_settings)
+
+    def _device_info_from_key(self, camera_key):
+        target_key = self._sanitize_camera_key(camera_key)
+        if not target_key:
+            return None
+        for info in self.list_camera_devices():
+            if self._camera_key_from_info(info) == target_key:
+                return info
+        return None
+
+    def _ensure_camera_profile(self, camera_key, seed_settings=None):
+        target_key = self._sanitize_camera_key(camera_key) or DEFAULT_CAMERA_KEY
+        if target_key in self.camera_profiles:
+            return target_key
+        base_settings = dict(seed_settings or self.runtime_settings or self.default_settings)
+        self.camera_profiles[target_key] = dict(base_settings)
+        return target_key
+
+    def _build_persistent_state(self):
+        return {
+            "runtime_platform": platform.system().lower(),
+            ACTIVE_CAMERA_KEY: self.active_camera_key,
+            CAMERA_PROFILES_KEY: {key: dict(value) for key, value in self.camera_profiles.items()},
+        }
+
+    def _persist_runtime_state(self):
+        try:
+            with open(self.settings_path, "w", encoding="utf-8") as f:
+                json.dump(self._build_persistent_state(), f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def set_active_camera(self, camera_key, persist=True):
+        target_key = self._sanitize_camera_key(camera_key) or DEFAULT_CAMERA_KEY
+        previous_key = self.active_camera_key
+        if target_key not in self.camera_profiles:
+            seed = self.camera_profiles.get(previous_key, self.runtime_settings or self.default_settings)
+            self.camera_profiles[target_key] = dict(seed)
+
+        self.active_camera_key = target_key
+        self.active_camera_info = self._device_info_from_key(target_key) or {}
+        self.runtime_settings = dict(self.camera_profiles[target_key])
+
+        if self.camera is not None and previous_key != target_key:
+            try:
+                self.camera.close()
+            except Exception:
+                pass
+            self.camera = None
+
+        self._sync_light_controller()
+        self.refresh_processing_parameters()
+        if persist:
+            self._persist_runtime_state()
+        return self.get_runtime_settings()
 
     def _resolve_ui_font_family(self):
         available = list(tkfont.families(self))
@@ -562,8 +671,14 @@ class MainWindow(Toplevel):
 
     def capture_single_image(self):
         exposure = float(self.runtime_settings.get("exposure_us", 50000.0))
-        if self.camera is None:
-            self.camera = CameraInterface(device_index=0, exposure=exposure, logger=self._emit_event_log)
+        camera_key = self.active_camera_key if self.active_camera_key != DEFAULT_CAMERA_KEY else ""
+        if self.camera is None or getattr(self.camera, "camera_key", "") != camera_key:
+            if self.camera is not None:
+                try:
+                    self.camera.close()
+                except Exception:
+                    pass
+            self.camera = CameraInterface(device_index=0, exposure=exposure, logger=self._emit_event_log, camera_key=camera_key)
         else:
             self.camera.update_exposure(exposure)
         return self.camera.capture_once()
@@ -592,18 +707,58 @@ class MainWindow(Toplevel):
 
     def _load_runtime_settings(self):
         settings = dict(self.default_settings)
+        self.camera_profiles = {}
+        self.active_camera_key = DEFAULT_CAMERA_KEY
+        self.active_camera_info = {}
+        current_platform = platform.system().lower()
+        available_devices = self.list_camera_devices()
+        available_keys = [self._camera_key_from_info(info) for info in available_devices if self._camera_key_from_info(info)]
+
         if not self.settings_path.exists():
-            settings["runtime_platform"] = platform.system().lower()
+            if available_keys:
+                self.active_camera_key = available_keys[0]
+                self.active_camera_info = available_devices[0]
+            self.camera_profiles[self.active_camera_key] = dict(settings)
+            settings["runtime_platform"] = current_platform
             return settings
         try:
             with open(self.settings_path, "r", encoding="utf-8") as f:
                 loaded = json.load(f)
-            if isinstance(loaded, dict):
-                settings.update(loaded)
         except Exception:
-            pass
+            loaded = {}
 
-        current_platform = platform.system().lower()
+        if isinstance(loaded, dict) and isinstance(loaded.get(CAMERA_PROFILES_KEY), dict):
+            raw_profiles = loaded.get(CAMERA_PROFILES_KEY, {})
+            for raw_key, profile in raw_profiles.items():
+                profile_key = self._sanitize_camera_key(raw_key)
+                if not profile_key or not isinstance(profile, dict):
+                    continue
+                merged_profile = dict(self.default_settings)
+                merged_profile.update(profile)
+                saved_platform = str(merged_profile.get("runtime_platform", "")).strip().lower()
+                if saved_platform and saved_platform != current_platform:
+                    merged_profile["light_serial_port"] = self.default_light_serial_port
+                merged_profile["light_serial_port"] = self._normalize_light_serial_port(merged_profile.get("light_serial_port", ""))
+                merged_profile["fabric_type"] = self._normalize_fabric_type(merged_profile.get("fabric_type", FABRIC_TYPE_OPTIONS[0]))
+                merged_profile["offset_estimation_mode"] = self._normalize_offset_estimation_mode(merged_profile.get("offset_estimation_mode", OFFSET_MODE_OPTIONS[0]))
+                merged_profile["fabric_color_mode"] = self._normalize_fabric_color_mode(merged_profile.get("fabric_color_mode", "浅紫色布料"))
+                merged_profile["runtime_platform"] = current_platform
+                self.camera_profiles[profile_key] = merged_profile
+
+            active_key = self._sanitize_camera_key(loaded.get(ACTIVE_CAMERA_KEY))
+            if not active_key or active_key not in self.camera_profiles:
+                active_key = available_keys[0] if available_keys else next(iter(self.camera_profiles), DEFAULT_CAMERA_KEY)
+            if active_key not in self.camera_profiles:
+                self.camera_profiles[active_key] = dict(self.default_settings)
+            self.active_camera_key = active_key
+            self.active_camera_info = self._device_info_from_key(active_key) or (available_devices[0] if available_devices else {})
+            settings = dict(self.camera_profiles[active_key])
+            settings["runtime_platform"] = current_platform
+            return settings
+
+        if isinstance(loaded, dict):
+            settings.update(loaded)
+
         saved_platform = str(settings.get("runtime_platform", "")).strip().lower()
         if saved_platform and saved_platform != current_platform:
             settings["light_serial_port"] = self.default_light_serial_port
@@ -613,6 +768,10 @@ class MainWindow(Toplevel):
         settings["offset_estimation_mode"] = self._normalize_offset_estimation_mode(settings.get("offset_estimation_mode", OFFSET_MODE_OPTIONS[0]))
         settings["fabric_color_mode"] = self._normalize_fabric_color_mode(settings.get("fabric_color_mode", "浅紫色布料"))
         settings["runtime_platform"] = current_platform
+        active_key = available_keys[0] if available_keys else DEFAULT_CAMERA_KEY
+        self.active_camera_key = active_key
+        self.active_camera_info = available_devices[0] if available_devices else {}
+        self.camera_profiles = {active_key: dict(settings)}
         return settings
 
     def get_runtime_settings(self):
@@ -679,9 +838,11 @@ class MainWindow(Toplevel):
         merged, ref_colors = self._normalize_settings(new_settings)
         self.ref_colors = ref_colors
         self.runtime_settings = merged
+        self.camera_profiles[self.active_camera_key] = dict(merged)
         if self.camera is not None:
             self.camera.update_exposure(self.runtime_settings["exposure_us"])
         self._sync_light_controller()
+        self.refresh_processing_parameters()
 
     def _sync_light_controller(self):
         if self.light_controller is None:
@@ -698,22 +859,15 @@ class MainWindow(Toplevel):
         )
 
     def save_runtime_settings(self):
-        try:
-            with open(self.settings_path, "w", encoding="utf-8") as f:
-                json.dump(self.runtime_settings, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+        self._persist_runtime_state()
 
     def save_runtime_settings_only(self, new_settings):
         """Persist new_settings to disk without applying them to the live
         camera/light/processing state. The currently applied
         self.runtime_settings is left untouched."""
         merged, _ref_colors = self._normalize_settings(new_settings)
-        try:
-            with open(self.settings_path, "w", encoding="utf-8") as f:
-                json.dump(merged, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+        self.camera_profiles[self.active_camera_key] = dict(merged)
+        self._persist_runtime_state()
         return merged
 
     def reload_runtime_settings(self):
@@ -721,6 +875,7 @@ class MainWindow(Toplevel):
         if self.camera is not None:
             self.camera.update_exposure(self.runtime_settings["exposure_us"])
         self._sync_light_controller()
+        self.refresh_processing_parameters()
         return self.get_runtime_settings()
 
     def refresh_processing_parameters(self):
