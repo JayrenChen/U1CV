@@ -26,6 +26,9 @@ LOGO_ICON_PATH = ASSETS_PATH / "icon_aitu.png"
 LOGO_PATH = ASSETS_PATH / "logo_aitu.png"
 ICON_HOME_PATH = ASSETS_PATH / "logo_home.png"
 ICON_SETTING_PATH = ASSETS_PATH / "logo_setting.png"
+ICON_REPLAY_PATH = ASSETS_PATH / "replay.png"
+ICON_DEBUG_PATH = ASSETS_PATH / "debug.png"
+ICON_AUTO_PATH = ASSETS_PATH / "auto.png"
 PROJECT_ROOT = OUTPUT_PATH.parents[1]
 OFFSET_MODE_OPTIONS = [
     "中心点偏差估计",
@@ -116,11 +119,14 @@ class MainWindow(Toplevel):
             "light_enabled": False,
             "plc_serial_port": "",
             "plc_baudrate": 115200,
+            "plc_unit_id": 1,
         }
         self.runtime_settings = self._load_runtime_settings()
         self.logo_full = None
         self.logo_home = None
         self.logo_replay = None
+        self.logo_debug = None
+        self.logo_auto = None
         self.logo_setting = None
         self._register_local_ui_fonts()
         self.ui_font_family = self._resolve_ui_font_family()
@@ -558,7 +564,9 @@ class MainWindow(Toplevel):
                 self.logo_full = tk.PhotoImage(file=str(LOGO_PATH))
                 self.logo_home = tk.PhotoImage(file=str(ICON_HOME_PATH))
                 self.logo_home = self.logo_home.subsample(8, 8)
-                self.logo_replay = self.logo_home
+                self.logo_replay = tk.PhotoImage(file=str(ICON_REPLAY_PATH)).subsample(8, 8)
+                self.logo_debug = tk.PhotoImage(file=str(ICON_DEBUG_PATH)).subsample(8, 8)
+                self.logo_auto = tk.PhotoImage(file=str(ICON_AUTO_PATH)).subsample(8, 8)
                 self.logo_setting = tk.PhotoImage(file=str(ICON_SETTING_PATH))
                 self.logo_setting = self.logo_setting.subsample(8, 8)
                 logo_label = tk.Label(sidebar, image=self.logo_full, bg=self.palette["bg_logo"], bd=0, highlightthickness=0)
@@ -567,6 +575,8 @@ class MainWindow(Toplevel):
                 self.logo_full = None
                 self.logo_home = None
                 self.logo_replay = None
+                self.logo_debug = None
+                self.logo_auto = None
                 self.logo_setting = None
 
         self.sidebar_indicator = Frame(sidebar, background=self.palette["indicator"])
@@ -606,8 +616,8 @@ class MainWindow(Toplevel):
 
         self.automation_btn = Button(
             sidebar,
-            text="  自动化",
-            image=self.logo_home,
+            text="  自动",
+            image=self.logo_auto,
             compound="left",
             fg="white",
             bg=self.palette["bg_sidebar"],
@@ -623,7 +633,7 @@ class MainWindow(Toplevel):
         self.debug_btn = Button(
             sidebar,
             text="  调试",
-            image=self.logo_replay,
+            image=self.logo_debug,
             compound="left",
             fg="white",
             bg=self.palette["bg_sidebar"],
@@ -702,11 +712,16 @@ class MainWindow(Toplevel):
         if not port:
             return False
         baudrate = int(settings.get("plc_baudrate", 115200))
+        unit_id = int(settings.get("plc_unit_id", 1))
         if getattr(self, "modbus_service", None) is not None:
-            if self.modbus_service.port == port and self.modbus_service.baudrate == baudrate:
+            if (
+                self.modbus_service.port == port
+                and self.modbus_service.baudrate == baudrate
+                and self.modbus_service.unit_id == unit_id
+            ):
                 return self.modbus_service.start()
             self.modbus_service.stop()
-        self.modbus_service = ModbusRtuSlave(port, baudrate, unit_id=1, on_trigger=self._on_plc_trigger, logger=self._queue_plc_log)
+        self.modbus_service = ModbusRtuSlave(port, baudrate, unit_id=unit_id, on_trigger=self._on_plc_trigger, logger=self._queue_plc_log)
         return self.modbus_service.start()
 
     def _queue_plc_log(self, message):
@@ -897,6 +912,7 @@ class MainWindow(Toplevel):
         merged["light_enabled"] = bool(merged.get("light_enabled", False))
         merged["plc_serial_port"] = self._normalize_light_serial_port(merged.get("plc_serial_port", ""))
         merged["plc_baudrate"] = _clamp_int(merged.get("plc_baudrate", 115200), 1200, 921600)
+        merged["plc_unit_id"] = _clamp_int(merged.get("plc_unit_id", 1), 1, 247)
 
         ref_colors = self._load_ref_colors()
         preset = ref_colors.get(merged["fabric_color_mode"])

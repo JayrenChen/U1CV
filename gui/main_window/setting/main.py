@@ -181,11 +181,11 @@ class Setting(Frame):
         cam_card = ttk.LabelFrame(container, text="相机参数", style="Panel.TLabelframe", padding=12)
         cam_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=(0, 6))
 
-        log_card = ttk.LabelFrame(container, text="日志设置", style="Panel.TLabelframe", padding=12)
-        log_card.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(0, 6))
-
         plc_card = ttk.LabelFrame(container, text="PLC Modbus 通信", style="Panel.TLabelframe", padding=12)
-        plc_card.grid(row=2, column=0, sticky="nsew", padx=(0, 6), pady=(0, 6))
+        plc_card.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(0, 6))
+
+        log_card = ttk.LabelFrame(container, text="日志设置", style="Panel.TLabelframe", padding=12)
+        log_card.grid(row=2, column=0, sticky="nsew", padx=(0, 6), pady=(0, 6))
 
         alg_card = ttk.LabelFrame(container, text="算法参数", style="Panel.TLabelframe", padding=12)
         alg_card.grid(row=0, column=1, rowspan=3, sticky="nsew", padx=(6, 0), pady=(0, 6))
@@ -225,6 +225,7 @@ class Setting(Frame):
             "自动保存": StringVar(value="否"),
             "PLC串口": StringVar(value=""),
             "PLC波特率": StringVar(value="115200"),
+            "PLC从机ID": StringVar(value="1"),
         }
 
         alg_fields = [
@@ -275,6 +276,17 @@ class Setting(Frame):
         cam_card.columnconfigure(1, weight=1)
         cam_card.columnconfigure(2, weight=0)
 
+        ttk.Label(plc_card, text="PLC串口:", style="Key.TLabel").grid(row=0, column=0, sticky="w", pady=5, padx=(0, 8))
+        self.plc_port_combo = ttk.Combobox(plc_card, textvariable=self.setting_vars["PLC串口"], state="readonly")
+        self.plc_port_combo.grid(row=0, column=1, sticky="ew", pady=5)
+        ttk.Button(plc_card, text="刷新", command=self._refresh_plc_ports, width=10).grid(row=0, column=2, sticky="w", padx=(8, 0), pady=5)
+        ttk.Label(plc_card, text="PLC波特率:", style="Key.TLabel").grid(row=1, column=0, sticky="w", pady=5, padx=(0, 8))
+        ttk.Combobox(plc_card, textvariable=self.setting_vars["PLC波特率"], values=["9600", "19200", "38400", "57600", "115200"], state="readonly").grid(row=1, column=1, sticky="ew", pady=5)
+        ttk.Label(plc_card, text="PLC从机ID:", style="Key.TLabel").grid(row=2, column=0, sticky="w", pady=5, padx=(0, 8))
+        tk.Spinbox(plc_card, from_=1, to=247, textvariable=self.setting_vars["PLC从机ID"]).grid(row=2, column=1, sticky="ew", pady=5)
+        # ttk.Label(plc_card, text="格式: 8N1，ID 范围 1-247", style="Value.TLabel").grid(row=3, column=0, columnspan=3, sticky="w", pady=5)
+        plc_card.columnconfigure(1, weight=1)
+
         ttk.Label(log_card, text="自动保存:", style="Key.TLabel").grid(row=0, column=0, sticky="w", pady=5, padx=(0, 8))
         auto_save_combo = ttk.Combobox(
             log_card,
@@ -286,14 +298,7 @@ class Setting(Frame):
         auto_save_combo.grid(row=0, column=1, sticky="w", pady=5)
         log_card.columnconfigure(1, weight=1)
 
-        ttk.Label(plc_card, text="PLC串口:", style="Key.TLabel").grid(row=0, column=0, sticky="w", pady=5, padx=(0, 8))
-        self.plc_port_combo = ttk.Combobox(plc_card, textvariable=self.setting_vars["PLC串口"], state="readonly")
-        self.plc_port_combo.grid(row=0, column=1, sticky="ew", pady=5)
-        ttk.Button(plc_card, text="刷新", command=self._refresh_plc_ports, width=10).grid(row=0, column=2, sticky="w", padx=(8, 0), pady=5)
-        ttk.Label(plc_card, text="PLC波特率:", style="Key.TLabel").grid(row=1, column=0, sticky="w", pady=5, padx=(0, 8))
-        ttk.Combobox(plc_card, textvariable=self.setting_vars["PLC波特率"], values=["9600", "19200", "38400", "57600", "115200"], state="readonly").grid(row=1, column=1, sticky="ew", pady=5)
-        ttk.Label(plc_card, text="格式: 8N1，从机地址固定为 1", style="Value.TLabel").grid(row=2, column=0, columnspan=3, sticky="w", pady=5)
-        plc_card.columnconfigure(1, weight=1)
+        
 
         for i, key in enumerate(alg_fields):
             ttk.Label(alg_card, text=key + ":", style="Key.TLabel").grid(row=i, column=0, sticky="w", pady=5, padx=(0, 8))
@@ -512,6 +517,7 @@ class Setting(Frame):
             "auto_save_on_process": self.setting_vars["自动保存"].get() == "是",
             "plc_serial_port": self.setting_vars["PLC串口"].get().strip(),
             "plc_baudrate": int(float(self.setting_vars["PLC波特率"].get())),
+            "plc_unit_id": self._clamp_int(self.setting_vars["PLC从机ID"].get(), 1, 247),
         }
 
     def _fill_vars(self, settings):
@@ -561,6 +567,7 @@ class Setting(Frame):
         self.setting_vars["自动保存"].set("是" if bool(settings.get("auto_save_on_process", False)) else "否")
         self.setting_vars["PLC串口"].set(str(settings.get("plc_serial_port", "")).strip())
         self.setting_vars["PLC波特率"].set(str(settings.get("plc_baudrate", 115200)))
+        self.setting_vars["PLC从机ID"].set(str(self._clamp_int(settings.get("plc_unit_id", 1), 1, 247)))
         self._refresh_plc_ports()
 
         preset = self.ref_colors.get(color_name)
@@ -643,6 +650,7 @@ class Setting(Frame):
             "light_enabled": False,
             "plc_serial_port": "",
             "plc_baudrate": 115200,
+            "plc_unit_id": 1,
         }
         self._sync_color_preset(defaults["fabric_color_mode"], defaults["hsv_lower"], defaults["hsv_upper"])
         self._fill_vars(defaults)
