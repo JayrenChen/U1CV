@@ -35,6 +35,8 @@
       "light_baudrate": 19200,
       "light_intensity": 45,
       "light_enabled": true,
+      "plc_serial_port": "",
+      "plc_baudrate": 115200,
       "runtime_platform": "windows"
     },
     "MV-CB060-10UC-S||DB1102033": {
@@ -70,6 +72,8 @@
       "light_baudrate": 19200,
       "light_intensity": 45,
       "light_enabled": true,
+      "plc_serial_port": "COM10",
+      "plc_baudrate": 115200,
       "runtime_platform": "windows"
     }
   }

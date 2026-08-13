@@ -23,10 +23,11 @@ def dashboard(parent, controller=None):
 
 
 class Dashboard(Frame):
-    def __init__(self, parent, controller=None, *args, **kwargs):
+    def __init__(self, parent, controller=None, automation_mode=False, *args, **kwargs):
         Frame.__init__(self, parent, *args, **kwargs)
         self.parent = parent
         self.controller = controller
+        self.automation_mode = automation_mode
         self.configure(bg="#FFF4EC")
         self.logo_page = None
         init_settings = self.controller.get_runtime_settings() if self.controller else None
@@ -181,10 +182,15 @@ class Dashboard(Frame):
         control_card.columnconfigure(0, weight=1)
         control_card.columnconfigure(1, weight=1)
 
-        ttk.Button(control_card, text="单次采集", style="Primary.TButton", command=self._on_capture).grid(row=0, column=0, sticky="ew", padx=(0, 6), pady=6)
-        ttk.Button(control_card, text="处理图像", style="Primary.TButton", command=self._on_process).grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=6)
-        ttk.Button(control_card, text="清空显示", command=self._on_clear).grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=6)
-        ttk.Button(control_card, text="保存结果", command=self._on_save_result).grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=6)
+        if self.automation_mode:
+            ttk.Label(control_card, text="当前页面由 PLC Modbus 指令触发检测", style="Value.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=6)
+            ttk.Button(control_card, text="单次采集", state="disabled").grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=6)
+            ttk.Button(control_card, text="处理图像", state="disabled").grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=6)
+        else:
+            ttk.Button(control_card, text="单次采集", style="Primary.TButton", command=self._on_capture).grid(row=0, column=0, sticky="ew", padx=(0, 6), pady=6)
+            ttk.Button(control_card, text="处理图像", style="Primary.TButton", command=self._on_process).grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=6)
+            ttk.Button(control_card, text="清空显示", command=self._on_clear).grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=6)
+            ttk.Button(control_card, text="保存结果", command=self._on_save_result).grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=6)
 
         log_card = ttk.LabelFrame(parent, text="事件日志", style="Panel.TLabelframe", padding=10)
         log_card.grid(row=3, column=0, sticky="nsew", pady=(8, 6))
@@ -312,6 +318,13 @@ class Dashboard(Frame):
 
         if auto_save_on_process:
             self._on_save_result()
+
+    def run_plc_detection(self):
+        """Run the same capture/process pipeline as the homepage from the GUI thread."""
+        self._append_log("收到 PLC 移料前视觉检测触发")
+        self._on_capture()
+        self._on_process()
+        return self.last_result
 
     @staticmethod
     def _save_image(path, img):

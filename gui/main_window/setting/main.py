@@ -184,11 +184,14 @@ class Setting(Frame):
         log_card = ttk.LabelFrame(container, text="日志设置", style="Panel.TLabelframe", padding=12)
         log_card.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(0, 6))
 
+        plc_card = ttk.LabelFrame(container, text="PLC Modbus 通信", style="Panel.TLabelframe", padding=12)
+        plc_card.grid(row=2, column=0, sticky="nsew", padx=(0, 6), pady=(0, 6))
+
         alg_card = ttk.LabelFrame(container, text="算法参数", style="Panel.TLabelframe", padding=12)
-        alg_card.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=(6, 0), pady=(0, 6))
+        alg_card.grid(row=0, column=1, rowspan=3, sticky="nsew", padx=(6, 0), pady=(0, 6))
 
         save_card = ttk.LabelFrame(container, text="系统设置", style="Panel.TLabelframe", padding=12)
-        save_card.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        save_card.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
 
         self.setting_vars = {
             "当前相机": StringVar(value=""),
@@ -220,6 +223,8 @@ class Setting(Frame):
             "HSV上界S": StringVar(value="100"),
             "HSV上界V": StringVar(value="100"),
             "自动保存": StringVar(value="否"),
+            "PLC串口": StringVar(value=""),
+            "PLC波特率": StringVar(value="115200"),
         }
 
         alg_fields = [
@@ -280,6 +285,15 @@ class Setting(Frame):
         )
         auto_save_combo.grid(row=0, column=1, sticky="w", pady=5)
         log_card.columnconfigure(1, weight=1)
+
+        ttk.Label(plc_card, text="PLC串口:", style="Key.TLabel").grid(row=0, column=0, sticky="w", pady=5, padx=(0, 8))
+        self.plc_port_combo = ttk.Combobox(plc_card, textvariable=self.setting_vars["PLC串口"], state="readonly")
+        self.plc_port_combo.grid(row=0, column=1, sticky="ew", pady=5)
+        ttk.Button(plc_card, text="刷新", command=self._refresh_plc_ports, width=10).grid(row=0, column=2, sticky="w", padx=(8, 0), pady=5)
+        ttk.Label(plc_card, text="PLC波特率:", style="Key.TLabel").grid(row=1, column=0, sticky="w", pady=5, padx=(0, 8))
+        ttk.Combobox(plc_card, textvariable=self.setting_vars["PLC波特率"], values=["9600", "19200", "38400", "57600", "115200"], state="readonly").grid(row=1, column=1, sticky="ew", pady=5)
+        ttk.Label(plc_card, text="格式: 8N1，从机地址固定为 1", style="Value.TLabel").grid(row=2, column=0, columnspan=3, sticky="w", pady=5)
+        plc_card.columnconfigure(1, weight=1)
 
         for i, key in enumerate(alg_fields):
             ttk.Label(alg_card, text=key + ":", style="Key.TLabel").grid(row=i, column=0, sticky="w", pady=5, padx=(0, 8))
@@ -377,6 +391,15 @@ class Setting(Frame):
                 self.light_port_combo.configure(values=ports)
         if current_port:
             self.setting_vars["光源串口"].set(current_port)
+
+    def _refresh_plc_ports(self):
+        ports = self._get_light_port_options()
+        current_port = self.setting_vars["PLC串口"].get().strip()
+        if current_port and current_port not in ports:
+            ports = [current_port] + ports
+        self.plc_port_combo.configure(values=ports)
+        if not current_port and ports:
+            self.setting_vars["PLC串口"].set(ports[0])
 
     def _update_color_inputs_state(self):
         state = "normal"
@@ -487,6 +510,8 @@ class Setting(Frame):
             "hsv_lower": hsv_lower,
             "hsv_upper": hsv_upper,
             "auto_save_on_process": self.setting_vars["自动保存"].get() == "是",
+            "plc_serial_port": self.setting_vars["PLC串口"].get().strip(),
+            "plc_baudrate": int(float(self.setting_vars["PLC波特率"].get())),
         }
 
     def _fill_vars(self, settings):
@@ -534,6 +559,9 @@ class Setting(Frame):
                 self.fabric_color_combo.configure(values=self._get_color_options())
         self.setting_vars["布料颜色"].set(color_name)
         self.setting_vars["自动保存"].set("是" if bool(settings.get("auto_save_on_process", False)) else "否")
+        self.setting_vars["PLC串口"].set(str(settings.get("plc_serial_port", "")).strip())
+        self.setting_vars["PLC波特率"].set(str(settings.get("plc_baudrate", 115200)))
+        self._refresh_plc_ports()
 
         preset = self.ref_colors.get(color_name)
         if preset is not None:
@@ -613,6 +641,8 @@ class Setting(Frame):
             "light_baudrate": 19200,
             "light_intensity": 50,
             "light_enabled": False,
+            "plc_serial_port": "",
+            "plc_baudrate": 115200,
         }
         self._sync_color_preset(defaults["fabric_color_mode"], defaults["hsv_lower"], defaults["hsv_upper"])
         self._fill_vars(defaults)

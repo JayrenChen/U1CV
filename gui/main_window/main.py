@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import os
 import platform
+import queue
 import subprocess
 import tkinter as tk
 import tkinter.font as tkfont
@@ -15,6 +16,7 @@ from gui.main_window.setting.main import Setting
 from gui.camera_interface import CameraInterface
 from gui.image_processing import FABRIC_TYPE_OPTIONS
 from gui.light_source_controller import LightSourceController
+from gui.modbus_slave import ModbusRtuSlave
 
 OUTPUT_PATH = Path(__file__).parent
 ASSETS_PATH = OUTPUT_PATH / Path("./assets")
@@ -81,6 +83,8 @@ class MainWindow(Toplevel):
         self.active_camera_key = DEFAULT_CAMERA_KEY
         self.active_camera_info = {}
         self.light_controller = LightSourceController()
+        self._plc_trigger_queue = queue.Queue()
+        self._plc_log_queue = queue.Queue()
         self.default_light_serial_port = "/dev/ttyUSB0" if platform.system().lower() == "linux" else ""
         self.settings_path = SETTINGS_PATH
         self.ref_color_path = REF_COLOR_PATH
@@ -110,6 +114,8 @@ class MainWindow(Toplevel):
             "light_baudrate": 19200,
             "light_intensity": 50,
             "light_enabled": False,
+            "plc_serial_port": "",
+            "plc_baudrate": 115200,
         }
         self.runtime_settings = self._load_runtime_settings()
         self.logo_full = None
@@ -165,6 +171,8 @@ class MainWindow(Toplevel):
         self._build_layout()
         self._wire_event_loggers()
         self.apply_runtime_settings(self.runtime_settings)
+        self._start_modbus_service()
+        self.after(100, self._poll_plc_triggers)
         self.protocol("WM_DELETE_WINDOW", self._on_window_close)
 
     def _normalize_light_serial_port(self, port_value):
@@ -592,9 +600,25 @@ class MainWindow(Toplevel):
             font=(self.ui_font_family, 14, "bold"),
             activebackground=self.palette["bg_sidebar_active"],
             activeforeground="white",
-            command=lambda: self.handle_btn_press("replay", 182),
+            command=lambda: self.handle_btn_press("replay", 234),
         )
-        self.replay_btn.place(x=20, y=182, width=150, height=46)
+        self.replay_btn.place(x=20, y=234, width=150, height=46)
+
+        self.automation_btn = Button(
+            sidebar,
+            text="  自动化",
+            image=self.logo_home,
+            compound="left",
+            fg="white",
+            bg=self.palette["bg_sidebar"],
+            bd=0,
+            relief="flat",
+            font=(self.ui_font_family, 14, "bold"),
+            activebackground=self.palette["bg_sidebar_active"],
+            activeforeground="white",
+            command=lambda: self.handle_btn_press("automation", 182),
+        )
+        self.automation_btn.place(x=20, y=182, width=150, height=46)
 
         self.debug_btn = Button(
             sidebar,
@@ -608,9 +632,9 @@ class MainWindow(Toplevel):
             font=(self.ui_font_family, 14, "bold"),
             activebackground=self.palette["bg_sidebar_active"],
             activeforeground="white",
-            command=lambda: self.handle_btn_press("debug", 234),
+            command=lambda: self.handle_btn_press("debug", 286),
         )
-        self.debug_btn.place(x=20, y=234, width=150, height=46)
+        self.debug_btn.place(x=20, y=286, width=150, height=46)
 
         self.setting_btn = Button(
             sidebar,
@@ -624,12 +648,13 @@ class MainWindow(Toplevel):
             font=(self.ui_font_family, 14, "bold"),
             activebackground=self.palette["bg_sidebar_active"],
             activeforeground="white",
-            command=lambda: self.handle_btn_press("set", 286),
+            command=lambda: self.handle_btn_press("set", 338),
         )
-        self.setting_btn.place(x=20, y=286, width=150, height=46)
+        self.setting_btn.place(x=20, y=338, width=150, height=46)
 
         self.windows = {
             "dash": Dashboard(self.content_area, controller=self),
+            "automation": Dashboard(self.content_area, controller=self, automation_mode=True),
             "replay": Replay(self.content_area, controller=self),
             "debug": DebugPage(self.content_area, controller=self),
             "set": Setting(self.content_area, controller=self),
@@ -668,6 +693,55 @@ class MainWindow(Toplevel):
 
         self.current_window = self.windows[target]
         self.current_window.pack(fill="both", expand=True)
+        if target == "automation":
+            self._start_modbus_service()
+
+    def _start_modbus_service(self):
+        settings = self.runtime_settings
+        port = str(settings.get("plc_serial_port", "")).strip()
+        if not port:
+            return False
+        baudrate = int(settings.get("plc_baudrate", 115200))
+        if getattr(self, "modbus_service", None) is not None:
+            if self.modbus_service.port == port and self.modbus_service.baudrate == baudrate:
+                return self.modbus_service.start()
+            self.modbus_service.stop()
+        self.modbus_service = ModbusRtuSlave(port, baudrate, unit_id=1, on_trigger=self._on_plc_trigger, logger=self._queue_plc_log)
+        return self.modbus_service.start()
+
+    def _queue_plc_log(self, message):
+        self._plc_log_queue.put_nowait(message)
+
+    def _on_plc_trigger(self):
+        self._plc_trigger_queue.put_nowait(True)
+
+    def _poll_plc_triggers(self):
+        try:
+            automation = self.windows.get("automation")
+            while not self._plc_log_queue.empty():
+                message = self._plc_log_queue.get_nowait()
+                print(message)
+                if automation is not None:
+                    automation._append_log(message)
+            if not self._plc_trigger_queue.empty():
+                self._plc_trigger_queue.get_nowait()
+                self._run_plc_detection()
+        finally:
+            if self.winfo_exists():
+                self.after(100, self._poll_plc_triggers)
+
+    def _run_plc_detection(self):
+        automation = self.windows.get("automation")
+        if automation is None:
+            return
+        result = automation.run_plc_detection()
+        service = getattr(self, "modbus_service", None)
+        if service is None:
+            return
+        if result is None:
+            service.update_result(False)
+            return
+        service.update_result(True, result.get("offset_x_mm", 0), result.get("offset_y_mm", 0), result.get("theta_deg", 0))
 
     def capture_single_image(self):
         exposure = float(self.runtime_settings.get("exposure_us", 50000.0))
@@ -821,6 +895,8 @@ class MainWindow(Toplevel):
         merged["light_baudrate"] = _clamp_int(merged.get("light_baudrate", 19200), 1200, 921600)
         merged["light_intensity"] = _clamp_int(merged.get("light_intensity", 50), 0, 255)
         merged["light_enabled"] = bool(merged.get("light_enabled", False))
+        merged["plc_serial_port"] = self._normalize_light_serial_port(merged.get("plc_serial_port", ""))
+        merged["plc_baudrate"] = _clamp_int(merged.get("plc_baudrate", 115200), 1200, 921600)
 
         ref_colors = self._load_ref_colors()
         preset = ref_colors.get(merged["fabric_color_mode"])
@@ -842,6 +918,7 @@ class MainWindow(Toplevel):
         if self.camera is not None:
             self.camera.update_exposure(self.runtime_settings["exposure_us"])
         self._sync_light_controller()
+        self._start_modbus_service()
         self.refresh_processing_parameters()
 
     def _sync_light_controller(self):
@@ -875,17 +952,19 @@ class MainWindow(Toplevel):
         if self.camera is not None:
             self.camera.update_exposure(self.runtime_settings["exposure_us"])
         self._sync_light_controller()
+        self._start_modbus_service()
         self.refresh_processing_parameters()
         return self.get_runtime_settings()
 
     def refresh_processing_parameters(self):
-        dash = self.windows.get("dash")
-        if dash is None:
-            return
-        try:
-            dash.processor.refresh_params()
-        except Exception:
-            pass
+        for target in ("dash", "automation"):
+            dash = self.windows.get(target)
+            if dash is None:
+                continue
+            try:
+                dash.processor.refresh_params()
+            except Exception:
+                pass
 
     def _on_window_close(self):
         if self.camera is not None:
@@ -893,6 +972,8 @@ class MainWindow(Toplevel):
             self.camera = None
         if self.light_controller is not None:
             self.light_controller.close()
+        if getattr(self, "modbus_service", None) is not None:
+            self.modbus_service.stop()
         master = self.master
         try:
             self.quit()
